@@ -590,7 +590,6 @@ function App() {
                             {record.category && (
                               <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
                             )}
-                            {/* 商品 / 商戶名稱設有 min-w-[5em] 確保至少顯示4-5個中文字寬度 */}
                             <span className="font-medium text-gray-800 min-w-[5em]">{record.item_name || '未填寫品名'}</span>
                             {record.type === 'income' ? (
                               record.is_reimbursed && (
@@ -609,22 +608,24 @@ function App() {
                           <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
                           {record.remark && <p className="text-xs text-gray-600 mt-0.5">備註：{record.remark}</p>}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
+                        <div className="flex flex-col items-end gap-1.5 shrink-0">
                           <div className={`font-bold w-32 text-right ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
                             {record.type === 'income' ? '+' : '-'}${Number(record.amount).toFixed(2)}
                           </div>
-                          <button 
-                            onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
-                            className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
-                          >
-                            修改
-                          </button>
-                          <button 
-                            onClick={() => handleDelete(record.id)}
-                            className="text-red-400 hover:text-red-600 text-sm font-medium px-2 py-1 rounded bg-red-50 hover:bg-red-100"
-                          >
-                            刪除
-                          </button>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
+                              className="text-blue-500 hover:text-blue-700 text-xs font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
+                            >
+                              修改
+                            </button>
+                            <button 
+                              onClick={() => handleDelete(record.id)}
+                              className="text-red-400 hover:text-red-600 text-xs font-medium px-2 py-1 rounded bg-red-50 hover:bg-red-100"
+                            >
+                              刪除
+                            </button>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -960,7 +961,6 @@ function App() {
                                   {record.category && (
                                     <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
                                   )}
-                                  {/* 歷史記錄中的商品/商戶名稱設有 min-w-[5em] */}
                                   <span className="font-medium text-gray-800 min-w-[5em]">{record.item_name || '未填寫品名'}</span>
                                   {record.type === 'income' ? (
                                     record.is_reimbursed && (
@@ -981,23 +981,25 @@ function App() {
                               </div>
                             </div>
 
-                            {/* 金額固定寬度與靠右對齊，確保寬鬆顯示 +/- 00000.00 */}
-                            <div className="flex items-center gap-2 shrink-0">
+                            {/* 金額在上方，修改與刪除按鈕分開上下兩行排在下方 */}
+                            <div className="flex flex-col items-end gap-1.5 shrink-0">
                               <div className={`font-bold w-32 text-right ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
                                 {record.type === 'income' ? '+' : '-'}${Number(record.amount).toFixed(2)}
                               </div>
-                              <button 
-                                onClick={() => handleStartInlineEdit(record)}
-                                className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
-                              >
-                                修改
-                              </button>
-                              <button 
-                                onClick={() => handleDelete(record.id)}
-                                className="text-red-400 hover:text-red-600 text-sm font-medium px-2 py-1 rounded bg-red-50 hover:bg-red-100"
-                              >
-                                刪除
-                              </button>
+                              <div className="flex gap-2">
+                                <button 
+                                  onClick={() => handleStartInlineEdit(record)}
+                                  className="text-blue-500 hover:text-blue-700 text-xs font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
+                                >
+                                  修改
+                                </button>
+                                <button 
+                                  onClick={() => handleDelete(record.id)}
+                                  className="text-red-400 hover:text-red-600 text-xs font-medium px-2 py-1 rounded bg-red-50 hover:bg-red-100"
+                                >
+                                  刪除
+                                </button>
+                              </div>
                             </div>
                           </div>
 
