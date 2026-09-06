@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 
 function App() {
-  // 新增記錄用的主畫面狀態
+  // 新送記錄用的主畫面狀態
   const [type, setType] = useState('expense')
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('')
@@ -23,6 +23,7 @@ function App() {
   // 篩選與分頁狀態
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all')
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('all') // 'all' | 'income' | 'expense'
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState('all') // 'all' | 'completed' | 'pending'
   const [currentPage, setCurrentPage] = useState(1)
   const recordsPerPage = 5
 
@@ -349,10 +350,19 @@ function App() {
     }
   }
 
+  // 過濾邏輯（包含收支、類別、狀態篩選）
   const filteredRecords = allRecords.filter(record => {
     const matchCategory = selectedCategoryFilter === 'all' || record.category === selectedCategoryFilter
     const matchType = selectedTypeFilter === 'all' || record.type === selectedTypeFilter
-    return matchCategory && matchType
+    
+    let matchStatus = true
+    if (selectedStatusFilter === 'completed') {
+      matchStatus = !!record.is_reimbursed
+    } else if (selectedStatusFilter === 'pending') {
+      matchStatus = !record.is_reimbursed
+    }
+
+    return matchCategory && matchType && matchStatus
   })
 
   const indexOfLastRecord = currentPage * recordsPerPage
@@ -372,7 +382,8 @@ function App() {
         onChange={(e) => handleHistoryFileUpload(e, uploadingRecordId)}
       />
 
-      <div className="w-full max-w-md bg-white rounded-xl shadow-md overflow-hidden p-6">
+      {/* 調整最大寬度為 max-w-lg 確保卡片有足夠空間顯示金額格式 */}
+      <div className="w-full max-w-lg bg-white rounded-xl shadow-md overflow-hidden p-6">
         
         {view === 'home' ? (
           // ================= 主畫面：專門用於輸入新交易 =================
@@ -448,7 +459,6 @@ function App() {
                 />
               </div>
 
-              {/* 若為收入顯示「已入賬」、入賬方式、備註；若為支出顯示「已報銷」、報銷者、報銷方式、備註（放最底） */}
               {type === 'income' ? (
                 <div className="space-y-3 bg-green-50 p-3 rounded-lg border border-green-200">
                   <div className="flex items-center gap-2">
@@ -524,7 +534,6 @@ function App() {
                       ))}
                     </select>
                   </div>
-                  {/* 備註放置最底 */}
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">備註</label>
                     <input 
@@ -563,7 +572,7 @@ function App() {
                 <h2 className="text-lg font-bold text-gray-800">最新記錄 (最近5筆)</h2>
                 {allRecords.length > 5 && (
                   <button 
-                    onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+                    onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
                     className="text-sm text-blue-600 font-semibold hover:underline"
                   >
                     查看全部歷史記錄 →
@@ -577,7 +586,7 @@ function App() {
                   allRecords.slice(0, 5).map((record) => (
                     <div key={record.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100 flex flex-col gap-2">
                       <div className="flex justify-between items-center">
-                        <div>
+                        <div className="flex-1 pr-2">
                           <div className="flex items-center gap-2 flex-wrap">
                             {record.category && (
                               <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
@@ -600,12 +609,13 @@ function App() {
                           <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
                           {record.remark && <p className="text-xs text-gray-600 mt-0.5">備註：{record.remark}</p>}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <div className={`font-bold ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                            {record.type === 'income' ? '+' : '-'}${record.amount}
+                        {/* 金額固定寬度與靠右對齊，確保寬鬆顯示 +/- 00000.00 */}
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className={`font-bold w-32 text-right ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                            {record.type === 'income' ? '+' : '-'}${Number(record.amount).toFixed(2)}
                           </div>
                           <button 
-                            onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
+                            onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
                             className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
                           >
                             修改
@@ -624,7 +634,7 @@ function App() {
               </div>
               {allRecords.length > 5 && (
                 <button 
-                  onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+                  onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
                   className="w-full mt-4 bg-gray-100 text-gray-700 py-2 rounded-lg font-semibold text-sm hover:bg-gray-200 transition-colors"
                 >
                   查看全部 {allRecords.length} 筆歷史記錄
@@ -654,7 +664,8 @@ function App() {
                   value={selectedTypeFilter}
                   onChange={(e) => {
                     setSelectedTypeFilter(e.target.value)
-                    setSelectedCategoryFilter('all') // 切換收支時自動重置類別篩選，確保對應
+                    setSelectedCategoryFilter('all')
+                    setSelectedStatusFilter('all')
                     setCurrentPage(1)
                     setSelectedIds([])
                     setInlineEditingId(null)
@@ -666,6 +677,28 @@ function App() {
                   <option value="expense">出數 (支出)</option>
                 </select>
               </div>
+
+              {selectedTypeFilter !== 'all' && (
+                <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                  <label className="text-sm font-medium text-gray-700">
+                    {selectedTypeFilter === 'income' ? '入賬狀態：' : '報銷狀態：'}
+                  </label>
+                  <select
+                    value={selectedStatusFilter}
+                    onChange={(e) => {
+                      setSelectedStatusFilter(e.target.value)
+                      setCurrentPage(1)
+                      setSelectedIds([])
+                      setInlineEditingId(null)
+                    }}
+                    className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700 w-48"
+                  >
+                    <option value="all">全部狀態</option>
+                    <option value="completed">{selectedTypeFilter === 'income' ? '已入賬' : '已報銷'}</option>
+                    <option value="pending">{selectedTypeFilter === 'income' ? '未入賬' : '未報銷'}</option>
+                  </select>
+                </div>
+              )}
 
               <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                 <label className="text-sm font-medium text-gray-700">類別篩選：</label>
@@ -843,7 +876,6 @@ function App() {
                             </div>
                           </div>
 
-                          {/* 若為收入顯示入賬方式；若為支出顯示報銷者與報銷方式 */}
                           {inlineForm.type === 'income' ? (
                             <div>
                               <label className="block text-[10px] text-gray-500 mb-0.5">入賬方式</label>
@@ -886,7 +918,6 @@ function App() {
                             </div>
                           )}
 
-                          {/* 備註欄位（放最底） */}
                           <div>
                             <label className="block text-[10px] text-gray-500 mb-0.5">備註</label>
                             <input 
@@ -918,14 +949,14 @@ function App() {
                         // ================= 一般檢視狀態 =================
                         <>
                           <div className="flex justify-between items-center">
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-3 flex-1 pr-2">
                               <input 
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => handleSelectOne(record.id)}
-                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer shrink-0"
                               />
-                              <div>
+                              <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   {record.category && (
                                     <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
@@ -950,9 +981,10 @@ function App() {
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-2">
-                              <div className={`font-bold ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                                {record.type === 'income' ? '+' : '-'}${record.amount}
+                            {/* 金額固定寬度與靠右對齊，確保寬鬆顯示 +/- 00000.00 */}
+                            <div className="flex items-center gap-2 shrink-0">
+                              <div className={`font-bold w-32 text-right ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                                {record.type === 'income' ? '+' : '-'}${Number(record.amount).toFixed(2)}
                               </div>
                               <button 
                                 onClick={() => handleStartInlineEdit(record)}
