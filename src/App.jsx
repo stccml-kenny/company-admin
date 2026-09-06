@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 
 function App() {
+  // 新增記錄用的主畫面狀態
   const [type, setType] = useState('expense')
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('')
@@ -10,21 +11,37 @@ function App() {
   const [isReimbursed, setIsReimbursed] = useState(false)
   const [file, setFile] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
+  
   const [allRecords, setAllRecords] = useState([])
   const [balance, setBalance] = useState(0)
-  const [view, setView] = useState('home')
-  const [editingId, setEditingId] = useState(null)
+  const [view, setView] = useState('home') // 'home' 代表主畫面新增記錄，'all' 代表全部歷史記錄
   
-  // 篩選、分頁與批次選取狀態
+  // 篩選與分頁狀態
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all')
   const [currentPage, setCurrentPage] = useState(1)
   const recordsPerPage = 5
-  const [selectedIds, setSelectedIds] = useState([]) // 批次勾選的 ID 陣列
-  const [batchCategory, setBatchCategory] = useState('') // 批次修改的類別
 
+  // 批次選取與批次修改狀態
+  const [selectedIds, setSelectedIds] = useState([])
+  const [batchCategory, setBatchCategory] = useState('')
+
+  // 獨立行內編輯狀態 (key 為 record.id)
+  const [inlineEditingId, setInlineEditingId] = useState(null)
+  const [inlineForm, setInlineForm] = useState({
+    amount: '',
+    category: '',
+    item_name: '',
+    type: 'expense',
+    is_reimbursed: false,
+    transaction_date: ''
+  })
+
+  // 檔案上傳參照
   const fileInputRef = useRef(null)
+  const historyFileInputRef = useRef(null)
+  const [uploadingRecordId, setUploadingRecordId] = useState(null)
 
-  // 可選的交易類別清單
+  // 獨立的交易類別選項
   const categoryOptions = ['交通', '飲食', '雜項', '娛樂', '薪資', '投資', '其他']
 
   const fetchRecords = async () => {
@@ -51,21 +68,8 @@ function App() {
     fetchRecords()
   }, [])
 
-  const handleEditClick = (record) => {
-    setEditingId(record.id)
-    setType(record.type || 'expense')
-    setAmount(record.amount !== undefined ? record.amount : '')
-    const matchedCategory = categoryOptions.includes(record.category) ? record.category : ''
-    setCategory(matchedCategory)
-    setItemName(record.item_name || '')
-    setIsReimbursed(record.is_reimbursed || false)
-    const cleanDate = record.transaction_date ? record.transaction_date.toString().split('T')[0] : new Date().toISOString().split('T')[0]
-    setTransactionDate(cleanDate)
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-
+  // 清空主畫面新增表單
   const resetForm = () => {
-    setEditingId(null)
     setType('expense')
     setAmount('')
     setCategory('')
@@ -78,10 +82,7 @@ function App() {
     }
   }
 
-  const handleCancelEdit = () => {
-    resetForm()
-  }
-
+  // 提交新增記錄
   const handleSubmit = async () => {
     if (!amount) {
       alert('請輸入金額！')
@@ -112,40 +113,20 @@ function App() {
         receiptUrl = publicURLData.publicUrl
       }
 
-      if (editingId) {
-        const updatePayload = { 
+      const { error } = await supabase
+        .from('transactions')
+        .insert([{ 
           type, 
           amount: parseFloat(amount), 
           category,
           item_name: itemName,
           is_reimbursed: isReimbursed,
-          transaction_date: transactionDate 
-        }
-        if (receiptUrl) updatePayload.receipt_url = receiptUrl
+          transaction_date: transactionDate,
+          receipt_url: receiptUrl 
+        }])
 
-        const { error } = await supabase
-          .from('transactions')
-          .update(updatePayload)
-          .match({ id: editingId })
-
-        if (error) throw error
-        alert('✅ 記錄修改成功！')
-      } else {
-        const { error } = await supabase
-          .from('transactions')
-          .insert([{ 
-            type, 
-            amount: parseFloat(amount), 
-            category,
-            item_name: itemName,
-            is_reimbursed: isReimbursed,
-            transaction_date: transactionDate,
-            receipt_url: receiptUrl 
-          }])
-
-        if (error) throw error
-        alert('✅ 記錄新增成功！')
-      }
+      if (error) throw error
+      alert('✅ 記錄新增成功！')
 
       resetForm()
       fetchRecords() 
@@ -173,7 +154,7 @@ function App() {
     }
   }
 
-  // 批次全選 / 取消全選（針對目前分頁或全部篩選資料）
+  // 批次全選 / 取消全選
   const handleSelectAll = () => {
     if (selectedIds.length === currentRecords.length) {
       setSelectedIds([])
@@ -245,12 +226,95 @@ function App() {
     }
   }
 
-  // 根據類別篩選資料
+  // 啟動歷史記錄中的行內直接編輯
+  const handleStartInlineEdit = (record) => {
+    setInlineEditingId(record.id)
+    setInlineForm({
+      amount: record.amount,
+      category: record.category || '',
+      item_name: record.item_name || '',
+      type: record.type || 'expense',
+      is_reimbursed: !!record.is_reimbursed,
+      transaction_date: record.transaction_date ? record.transaction_date.toString().split('T')[0] : new Date().toISOString().split('T')[0]
+    })
+  }
+
+  // 儲存行內直接編輯的結果
+  const handleSaveInlineEdit = async (id) => {
+    if (!inlineForm.amount || !inlineForm.category) {
+      alert('金額與交易類別不能為空！')
+      return
+    }
+
+    setIsLoading(true)
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .update({
+          amount: parseFloat(inlineForm.amount),
+          category: inlineForm.category,
+          item_name: inlineForm.item_name,
+          type: inlineForm.type,
+          is_reimbursed: inlineForm.is_reimbursed,
+          transaction_date: inlineForm.transaction_date
+        })
+        .eq('id', id)
+
+      if (error) throw error
+
+      alert('✅ 記錄更新成功！')
+      setInlineEditingId(null)
+      fetchRecords()
+    } catch (error) {
+      alert('❌ 更新失敗：' + error.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleHistoryFileUpload = async (e, recordId) => {
+    const uploadedFile = e.target.files[0]
+    if (!uploadedFile) return
+
+    setIsLoading(true)
+    try {
+      const fileExt = uploadedFile.name.split('.').pop()
+      const fileName = `${Date.now()}.${fileExt}`
+      const { error: uploadError } = await supabase.storage
+        .from('receipts')
+        .upload(fileName, uploadedFile)
+
+      if (uploadError) throw uploadError
+
+      const { data: publicURLData } = supabase.storage
+        .from('receipts')
+        .getPublicUrl(fileName)
+      
+      const receiptUrl = publicURLData.publicUrl
+
+      const { error: updateError } = await supabase
+        .from('transactions')
+        .update({ receipt_url: receiptUrl })
+        .eq('id', recordId)
+
+      if (updateError) throw updateError
+
+      alert('✅ 收據上傳成功！')
+      fetchRecords()
+    } catch (error) {
+      alert('❌ 上傳收據失敗：' + error.message)
+    } finally {
+      setIsLoading(false)
+      if (historyFileInputRef.current) {
+        historyFileInputRef.current.value = ''
+      }
+    }
+  }
+
   const filteredRecords = selectedCategoryFilter === 'all' 
     ? allRecords 
     : allRecords.filter(record => record.category === selectedCategoryFilter)
 
-  // 計算分頁資料
   const indexOfLastRecord = currentPage * recordsPerPage
   const indexOfFirstRecord = indexOfLastRecord - recordsPerPage
   const currentRecords = filteredRecords.slice(indexOfFirstRecord, indexOfLastRecord)
@@ -258,9 +322,18 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 font-sans flex justify-center items-start pt-10 pb-10">
+      <input 
+        type="file"
+        ref={historyFileInputRef}
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={(e) => handleHistoryFileUpload(e, uploadingRecordId)}
+      />
+
       <div className="w-full max-w-md bg-white rounded-xl shadow-md overflow-hidden p-6">
         
         {view === 'home' ? (
+          // ================= 主畫面：專門用於輸入新交易 =================
           <>
             <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">公司記賬系統</h1>
             
@@ -272,13 +345,6 @@ function App() {
             </div>
             
             <div className="space-y-4 mb-8">
-              {editingId && (
-                <div className="bg-amber-50 border border-amber-200 p-3 rounded-lg flex justify-between items-center">
-                  <span className="text-xs text-amber-800 font-semibold">⚠️ 目前正在修改記錄 #{editingId}</span>
-                  <button onClick={handleCancelEdit} className="text-xs text-red-600 underline font-bold">取消編輯</button>
-                </div>
-              )}
-
               <div className="flex gap-3">
                 <button 
                   onClick={() => setType('income')}
@@ -340,7 +406,6 @@ function App() {
                 />
               </div>
 
-              {/* 報銷狀態選項 */}
               <div className="flex items-center gap-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
                 <input 
                   type="checkbox" 
@@ -368,9 +433,9 @@ function App() {
               <button 
                 onClick={handleSubmit}
                 disabled={isLoading}
-                className={`w-full py-4 rounded-lg font-bold text-lg mt-2 shadow transition-colors text-white ${editingId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-blue-600 hover:bg-blue-700'} disabled:bg-opacity-50`}
+                className="w-full py-4 rounded-lg font-bold text-lg mt-2 shadow transition-colors text-white bg-blue-600 hover:bg-blue-700 disabled:bg-opacity-50"
               >
-                {isLoading ? '處理中...' : (editingId ? '確認修改記錄' : '確認記錄')}
+                {isLoading ? '處理中...' : '確認記錄新交易'}
               </button>
             </div>
 
@@ -382,7 +447,7 @@ function App() {
                     onClick={() => { setSelectedCategoryFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
                     className="text-sm text-blue-600 font-semibold hover:underline"
                   >
-                    查看全部 →
+                    查看全部歷史記錄 →
                   </button>
                 )}
               </div>
@@ -410,7 +475,7 @@ function App() {
                             {record.type === 'income' ? '+' : '-'}${record.amount}
                           </div>
                           <button 
-                            onClick={() => handleEditClick(record)}
+                            onClick={() => { setSelectedCategoryFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
                             className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
                           >
                             修改
@@ -423,13 +488,6 @@ function App() {
                           </button>
                         </div>
                       </div>
-                      {record.receipt_url && (
-                        <div>
-                          <a href={record.receipt_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline">
-                            查看收據相片 📷
-                          </a>
-                        </div>
-                      )}
                     </div>
                   ))
                 )}
@@ -445,14 +503,14 @@ function App() {
             </div>
           </>
         ) : (
-          // ================= 全部記錄頁面 (支援批次操作) =================
+          // ================= 全部歷史記錄頁面 (支援批次操作 & 行內修改) =================
           <>
             <div className="flex justify-between items-center mb-6">
               <button 
-                onClick={() => { setSelectedIds([]); setView('home'); }}
+                onClick={() => { setSelectedIds(); setInlineEditingId(null); setView('home'); }}
                 className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors"
               >
-                ← 返回主頁
+                ← 返回主畫面新增
               </button>
               <h1 className="text-xl font-bold text-gray-800">全部歷史記錄</h1>
               <div className="w-16"></div>
@@ -467,6 +525,7 @@ function App() {
                   setSelectedCategoryFilter(e.target.value)
                   setCurrentPage(1)
                   setSelectedIds([])
+                  setInlineEditingId(null)
                 }}
                 className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700"
               >
@@ -477,7 +536,7 @@ function App() {
               </select>
             </div>
 
-            {/* 批次操作控制列（僅在勾選項目時顯示） */}
+            {/* 批次操作控制列 */}
             <div className="mb-4 bg-blue-50 border border-blue-200 p-3 rounded-lg">
               <div className="flex justify-between items-center mb-2">
                 <span className="text-xs font-bold text-blue-800">
@@ -514,7 +573,6 @@ function App() {
                     </button>
                   </div>
 
-                  {/* 批次修改類別 */}
                   <div className="flex gap-2 items-center mt-1">
                     <select
                       value={batchCategory}
@@ -543,58 +601,176 @@ function App() {
               ) : (
                 currentRecords.map((record) => {
                   const isChecked = selectedIds.includes(record.id)
+                  const isInlineEditing = inlineEditingId === record.id
+
                   return (
                     <div 
                       key={record.id} 
-                      className={`p-3 rounded-lg border transition-colors flex flex-col gap-2 ${isChecked ? 'bg-blue-50 border-blue-300' : 'bg-gray-50 border-gray-100'}`}
+                      className={`p-3 rounded-lg border transition-colors flex flex-col gap-2 ${isChecked ? 'bg-blue-50 border-blue-300' : (isInlineEditing ? 'bg-amber-50/40 border-amber-300' : 'bg-gray-50 border-gray-100')}`}
                     >
-                      <div className="flex justify-between items-center">
-                        <div className="flex items-center gap-3">
-                          {/* 批次選取勾選框 */}
-                          <input 
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => handleSelectOne(record.id)}
-                            className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
-                          />
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              {record.category && (
-                                <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
-                              )}
-                              <span className="font-medium text-gray-800">{record.item_name || '未填寫品名'}</span>
-                              {record.is_reimbursed && (
-                                <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">已報銷</span>
-                              )}
-                            </div>
-                            <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
+                      {isInlineEditing ? (
+                        // ================= 行內編輯狀態 =================
+                        <div className="space-y-3 bg-white p-3 rounded-lg border border-amber-300">
+                          <div className="flex justify-between items-center text-xs font-bold text-amber-800">
+                            <span>✏️ 修改記錄 #{record.id.slice(0, 8)}</span>
                           </div>
-                        </div>
 
-                        <div className="flex items-center gap-2">
-                          <div className={`font-bold ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
-                            {record.type === 'income' ? '+' : '-'}${record.amount}
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setInlineForm({ ...inlineForm, type: 'income' })}
+                              className={`flex-1 py-1.5 rounded text-xs font-bold ${inlineForm.type === 'income' ? 'bg-green-500 text-white' : 'bg-gray-100 text-gray-500'}`}
+                            >
+                              收入
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setInlineForm({ ...inlineForm, type: 'expense' })}
+                              className={`flex-1 py-1.5 rounded text-xs font-bold ${inlineForm.type === 'expense' ? 'bg-red-500 text-white' : 'bg-gray-100 text-gray-500'}`}
+                            >
+                              支出
+                            </button>
                           </div>
-                          <button 
-                            onClick={() => { setSelectedIds([]); setView('home'); handleEditClick(record); }}
-                            className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
-                          >
-                            修改
-                          </button>
-                          <button 
-                            onClick={() => handleDelete(record.id)}
-                            className="text-red-400 hover:text-red-600 text-sm font-medium px-2 py-1 rounded bg-red-50 hover:bg-red-100"
-                          >
-                            刪除
-                          </button>
+
+                          <div className="flex gap-2">
+                            <div className="flex-1">
+                              <label className="block text-[10px] text-gray-500 mb-0.5">金額 (HKD)</label>
+                              <input 
+                                type="number" 
+                                value={inlineForm.amount}
+                                onChange={(e) => setInlineForm({ ...inlineForm, amount: e.target.value })}
+                                className="w-full border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            <div className="flex-1">
+                              <label className="block text-[10px] text-gray-500 mb-0.5">交易類別 *</label>
+                              <select 
+                                value={inlineForm.category}
+                                onChange={(e) => setInlineForm({ ...inlineForm, category: e.target.value })}
+                                className="w-full border border-gray-300 rounded p-1.5 text-sm outline-none bg-white focus:border-blue-500"
+                              >
+                                <option value="" disabled>請選擇</option>
+                                {categoryOptions.map((cat) => (
+                                  <option key={cat} value={cat}>{cat}</option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div>
+                            <label className="block text-[10px] text-gray-500 mb-0.5">品名名稱</label>
+                            <input 
+                              type="text" 
+                              value={inlineForm.item_name}
+                              onChange={(e) => setInlineForm({ ...inlineForm, item_name: e.target.value })}
+                              className="w-full border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-blue-500"
+                              placeholder="例如：午餐、車費"
+                            />
+                          </div>
+
+                          <div className="flex gap-2">
+                            <div className="flex-1">
+                              <label className="block text-[10px] text-gray-500 mb-0.5">交易日期</label>
+                              <input 
+                                type="date" 
+                                value={inlineForm.transaction_date}
+                                onChange={(e) => setInlineForm({ ...inlineForm, transaction_date: e.target.value })}
+                                className="w-full border border-gray-300 rounded p-1.5 text-xs outline-none focus:border-blue-500"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1.5 pt-4">
+                              <input 
+                                type="checkbox"
+                                id={`inline-reimbursed-${record.id}`}
+                                checked={inlineForm.is_reimbursed}
+                                onChange={(e) => setInlineForm({ ...inlineForm, is_reimbursed: e.target.checked })}
+                                className="w-4 h-4 text-blue-600 rounded border-gray-300"
+                              />
+                              <label htmlFor={`inline-reimbursed-${record.id}`} className="text-xs text-gray-700 cursor-pointer">
+                                此筆交易已報銷
+                              </label>
+                            </div>
+                          </div>
+
+                          <div className="flex gap-2 pt-1">
+                            <button
+                              onClick={() => handleSaveInlineEdit(record.id)}
+                              disabled={isLoading}
+                              className="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-xs py-2 rounded font-bold shadow transition-colors"
+                            >
+                              {isLoading ? '儲存中...' : '儲存修改'}
+                            </button>
+                            <button
+                              onClick={() => setInlineEditingId(null)}
+                              className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs py-2 rounded font-bold transition-colors"
+                            >
+                              取消
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                      {record.receipt_url && (
-                        <div className="pl-7">
-                          <a href={record.receipt_url} target="_blank" rel="noreferrer" className="text-xs text-blue-600 underline">
-                            查看收據相片 📷
-                          </a>
-                        </div>
+                      ) : (
+                        // ================= 一般檢視狀態 =================
+                        <>
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-3">
+                              <input 
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => handleSelectOne(record.id)}
+                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer"
+                              />
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {record.category && (
+                                    <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
+                                  )}
+                                  <span className="font-medium text-gray-800">{record.item_name || '未填寫品名'}</span>
+                                  {record.is_reimbursed && (
+                                    <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">已報銷</span>
+                                  )}
+                                </div>
+                                <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <div className={`font-bold ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
+                                {record.type === 'income' ? '+' : '-'}${record.amount}
+                              </div>
+                              <button 
+                                onClick={() => handleStartInlineEdit(record)}
+                                className="text-blue-500 hover:text-blue-700 text-sm font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
+                              >
+                                修改
+                              </button>
+                              <button 
+                                onClick={() => handleDelete(record.id)}
+                                className="text-red-400 hover:text-red-600 text-sm font-medium px-2 py-1 rounded bg-red-50 hover:bg-red-100"
+                              >
+                                刪除
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-between items-center text-xs pl-7 pt-1">
+                            {record.receipt_url ? (
+                              <a href={record.receipt_url} target="_blank" rel="noreferrer" className="text-blue-600 underline">
+                                查看收據相片 📷
+                              </a>
+                            ) : (
+                              <span className="text-gray-400">無收據</span>
+                            )}
+                            <button
+                              onClick={() => {
+                                setUploadingRecordId(record.id)
+                                if (historyFileInputRef.current) historyFileInputRef.current.click()
+                              }}
+                              className="text-indigo-600 hover:text-indigo-800 font-medium bg-indigo-50 px-2 py-1 rounded"
+                            >
+                              {record.receipt_url ? '更換收據' : '＋ 上傳收據'}
+                            </button>
+                          </div>
+                        </>
                       )}
                     </div>
                   )
@@ -604,7 +780,7 @@ function App() {
 
             {/* 分頁按鈕控制列 */}
             {totalPages > 1 && (
-              <div className="flex justify-between items-center mb-6 bg-gray-50 p-3 rounded-lg border border-gray-200">
+              <div className="flex justify-between items-center mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
                 <button
                   onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
                   disabled={currentPage === 1}
@@ -624,13 +800,6 @@ function App() {
                 </button>
               </div>
             )}
-
-            <button 
-              onClick={() => { setSelectedIds([]); setView('home'); }}
-              className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold text-center shadow hover:bg-blue-700 transition-colors"
-            >
-              返回主頁新增記錄
-            </button>
           </>
         )}
 
