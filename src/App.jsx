@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 
 function App() {
-  // 新送記錄用的主畫面狀態
+  // 新增記錄用的主畫面狀態
   const [type, setType] = useState('expense')
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('')
@@ -382,7 +382,6 @@ function App() {
         onChange={(e) => handleHistoryFileUpload(e, uploadingRecordId)}
       />
 
-      {/* 調整最大寬度為 max-w-lg 確保卡片有足夠空間顯示金額格式 */}
       <div className="w-full max-w-lg bg-white rounded-xl shadow-md overflow-hidden p-6">
         
         {view === 'home' ? (
@@ -439,7 +438,7 @@ function App() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">商品 / 品名名稱</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">商品 / 商戶名稱</label>
                 <input 
                   type="text" 
                   value={itemName}
@@ -591,7 +590,8 @@ function App() {
                             {record.category && (
                               <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
                             )}
-                            <span className="font-medium text-gray-800">{record.item_name || '未填寫品名'}</span>
+                            {/* 商品 / 商戶名稱設有 min-w-[5em] 確保至少顯示4-5個中文字寬度 */}
+                            <span className="font-medium text-gray-800 min-w-[5em]">{record.item_name || '未填寫品名'}</span>
                             {record.type === 'income' ? (
                               record.is_reimbursed && (
                                 <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">
@@ -609,7 +609,6 @@ function App() {
                           <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
                           {record.remark && <p className="text-xs text-gray-600 mt-0.5">備註：{record.remark}</p>}
                         </div>
-                        {/* 金額固定寬度與靠右對齊，確保寬鬆顯示 +/- 00000.00 */}
                         <div className="flex items-center gap-2 shrink-0">
                           <div className={`font-bold w-32 text-right ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
                             {record.type === 'income' ? '+' : '-'}${Number(record.amount).toFixed(2)}
@@ -842,7 +841,7 @@ function App() {
                           </div>
 
                           <div>
-                            <label className="block text-[10px] text-gray-500 mb-0.5">品名名稱</label>
+                            <label className="block text-[10px] text-gray-500 mb-0.5">商品 / 商戶名稱</label>
                             <input 
                               type="text" 
                               value={inlineForm.item_name}
@@ -961,7 +960,8 @@ function App() {
                                   {record.category && (
                                     <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
                                   )}
-                                  <span className="font-medium text-gray-800">{record.item_name || '未填寫品名'}</span>
+                                  {/* 歷史記錄中的商品/商戶名稱設有 min-w-[5em] */}
+                                  <span className="font-medium text-gray-800 min-w-[5em]">{record.item_name || '未填寫品名'}</span>
                                   {record.type === 'income' ? (
                                     record.is_reimbursed && (
                                       <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">
