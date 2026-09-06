@@ -17,21 +17,30 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   
   const [allRecords, setAllRecords] = useState([])
+  const [employees, setEmployees] = useState([]) // 員工預支列表
+  const [advanceDetails, setAdvanceDetails] = useState([]) // 所有預支明細記錄
   const [balance, setBalance] = useState(0)
-  const [view, setView] = useState('home') // 'home' 代表主畫面新增記錄，'all' 代表全部歷史記錄
+  const [view, setView] = useState('home') // 'home' | 'all' | 'advances'
   
+  // 員工預支管理頁面的互動狀態
+  const [newEmpName, setNewEmpName] = useState('')
+  const [selectedEmpIdForAdvance, setSelectedEmpIdForAdvance] = useState('')
+  const [advanceDate, setAdvanceDate] = useState(new Date().toISOString().split('T')[0])
+  const [advanceAmt, setAdvanceAmt] = useState('')
+  const [advanceMethod, setAdvanceMethod] = useState('銀行轉賬')
+  const [advanceRemark, setAdvanceRemark] = useState('')
+
   // 篩選與分頁狀態
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all')
-  const [selectedTypeFilter, setSelectedTypeFilter] = useState('all') // 'all' | 'income' | 'expense'
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState('all') // 'all' | 'completed' | 'pending'
+  const [selectedTypeFilter, setSelectedTypeFilter] = useState('all') 
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState('all') 
   const [currentPage, setCurrentPage] = useState(1)
   const recordsPerPage = 5
 
-  // 批次選取與批次修改狀態
+  // 批次選取狀態
   const [selectedIds, setSelectedIds] = useState([])
-  const [batchCategory, setBatchCategory] = useState('')
 
-  // 獨立行內編輯狀態 (key 為 record.id)
+  // 獨立行內編輯狀態
   const [inlineEditingId, setInlineEditingId] = useState(null)
   const [inlineForm, setInlineForm] = useState({
     amount: '',
@@ -51,23 +60,19 @@ function App() {
   const historyFileInputRef = useRef(null)
   const [uploadingRecordId, setUploadingRecordId] = useState(null)
 
-  // 定義收入與支出的專屬類別清單
+  // 類別清單
   const incomeCategories = ['導師費', '材料費', '拍攝費用']
   const expenseCategories = ['交通', '飲食', '雜項', '娛樂', '投資', '薪資', '其他']
 
-  // 根據當前選擇的「收支篩選 (selectedTypeFilter)」動態決定類別篩選可見的選項
   const getDynamicCategoryFilterOptions = () => {
-    if (selectedTypeFilter === 'income') {
-      return incomeCategories
-    } else if (selectedTypeFilter === 'expense') {
-      return expenseCategories
-    } else {
-      return Array.from(new Set([...incomeCategories, ...expenseCategories]))
-    }
+    if (selectedTypeFilter === 'income') return incomeCategories
+    if (selectedTypeFilter === 'expense') return expenseCategories
+    return Array.from(new Set([...incomeCategories, ...expenseCategories]))
   }
 
   const currentCategoryFilterOptions = getDynamicCategoryFilterOptions()
 
+  // 載入交易記錄
   const fetchRecords = async () => {
     const { data, error } = await supabase
       .from('transactions')
@@ -76,7 +81,7 @@ function App() {
       .order('id', { ascending: false })
     
     if (error) {
-      console.error('讀取失敗:', error.message)
+      console.error('讀取記錄失敗:', error.message)
       return
     }
     if (data) {
@@ -88,11 +93,133 @@ function App() {
     }
   }
 
+  // 載入員工與預支明細
+  const fetchData = async () => {
+    const { data: empData, error: empError } = await supabase
+      .from('advances')
+      .select('*')
+      .order('employee_name', { ascending: true })
+
+    if (!empError && empData) {
+      setEmployees(empData)
+    }
+
+    const { data: detData, error: detError } = await supabase
+      .from('advance_transactions')
+      .select('*')
+      .order('date', { ascending: false })
+
+    if (!detError && detData) {
+      setAdvanceDetails(detData)
+    }
+  }
+
   useEffect(() => {
     fetchRecords()
+    fetchData()
   }, [])
 
-  // 清空主畫面新增表單
+  // 新增員工
+  const handleAddEmployee = async (e) => {
+    e.preventDefault()
+    if (!newEmpName) {
+      alert('請輸入員工姓名！')
+      return
+    }
+
+    const { error } = await supabase
+      .from('advances')
+      .insert([{ employee_name: newEmpName, initial_amount: 0, balance: 0, status: 'active' }])
+
+    if (error) {
+      alert('新增員工失敗（可能已存在）：' + error.message)
+    } else {
+      alert(`✅ 成功新增員工：${newEmpName}`)
+      setNewEmpName('')
+      await fetchData()
+    }
+  }
+
+  // 切換員工狀態 (active / inactive)
+  const handleToggleEmployeeStatus = async (emp) => {
+    const nextStatus = emp.status === 'active' ? 'inactive' : 'active'
+    const { error } = await supabase
+      .from('advances')
+      .update({ status: nextStatus })
+      .eq('id', emp.id)
+
+    if (error) {
+      alert('狀態更新失敗：' + error.message)
+    } else {
+      fetchData()
+    }
+  }
+
+  // 新增一筆預支資金明細
+  const handleAddAdvanceTransaction = async (e) => {
+    e.preventDefault()
+    if (!selectedEmpIdForAdvance || !advanceAmt) {
+      alert('請選擇員工並輸入預支金額！')
+      return
+    }
+
+    const amt = parseFloat(advanceAmt)
+    const emp = employees.find(e => e.id === selectedEmpIdForAdvance)
+    if (!emp) return
+
+    const { error: insError } = await supabase
+      .from('advance_transactions')
+      .insert([{
+        employee_id: emp.id,
+        date: advanceDate,
+        amount: amt,
+        method: advanceMethod,
+        remark: advanceRemark
+      }])
+
+    if (insError) {
+      alert('記錄預支失敗：' + insError.message)
+      return
+    }
+
+    const newInitial = emp.initial_amount + amt
+    const newBal = emp.balance + amt
+    const { error: updError } = await supabase
+      .from('advances')
+      .update({ initial_amount: newInitial, balance: newBal })
+      .eq('id', emp.id)
+
+    if (updError) {
+      alert('更新預支總額失敗：' + updError.message)
+    } else {
+      alert(`✅ 成功為 ${emp.employee_name} 記錄一筆預支資金 $${amt.toFixed(2)}`)
+      setAdvanceAmt('')
+      setAdvanceRemark('')
+      fetchData()
+    }
+  }
+
+  // 刪除預支明細
+  const handleDeleteAdvanceTransaction = async (det) => {
+    if (!window.confirm('確定要刪除這筆預支記錄嗎？這會同步扣減該員工的預支總額與餘額！')) return
+
+    const emp = employees.find(e => e.id === det.employee_id)
+    if (emp) {
+      const newInitial = Math.max(0, emp.initial_amount - det.amount)
+      const newBal = Math.max(0, emp.balance - det.amount)
+
+      await supabase.from('advances').update({ initial_amount: newInitial, balance: newBal }).eq('id', emp.id)
+    }
+
+    const { error } = await supabase.from('advance_transactions').delete().eq('id', det.id)
+    if (error) {
+      alert('刪除失敗：' + error.message)
+    } else {
+      fetchData()
+    }
+  }
+
+  // 清空主畫面表單
   const resetForm = () => {
     setType('expense')
     setAmount('')
@@ -105,9 +232,7 @@ function App() {
     setRemark('')
     setTransactionDate(new Date().toISOString().split('T')[0])
     setFile(null)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ''
-    }
+    if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
   // 提交新增記錄
@@ -119,6 +244,19 @@ function App() {
     if (!category) {
       alert('請選擇交易類別！')
       return
+    }
+
+    const numAmount = parseFloat(amount)
+
+    // 若為支出且已報銷，檢查是否有填寫報銷者（該報銷者即為對消預支資金的員工）
+    if (type === 'expense' && isReimbursed && reimburser) {
+      const emp = employees.find(e => e.employee_name === reimburser)
+      if (emp) {
+        if (emp.balance < numAmount) {
+          alert(`⚠️ 該員工 (${reimburser}) 預支餘額不足！目前餘額：$${emp.balance.toFixed(2)}，本次報銷金額：$${numAmount.toFixed(2)}`)
+          return
+        }
+      }
     }
 
     setIsLoading(true)
@@ -141,27 +279,41 @@ function App() {
         receiptUrl = publicURLData.publicUrl
       }
 
-      const { error } = await supabase
+      // 1. 寫入交易記錄
+      const { error: insertError } = await supabase
         .from('transactions')
         .insert([{ 
           type, 
-          amount: parseFloat(amount), 
+          amount: numAmount, 
           category,
           item_name: itemName,
           is_reimbursed: isReimbursed,
           account_method: type === 'income' ? accountMethod : null,
           reimburser: type === 'expense' ? reimburser : null,
           reimbursement_method: type === 'expense' ? reimbursementMethod : null,
+          advance_deduction_employee: (type === 'expense' && isReimbursed && reimburser) ? reimburser : null,
+          advance_deduction_amount: (type === 'expense' && isReimbursed && reimburser) ? numAmount : 0,
           remark: remark,
           transaction_date: transactionDate,
           receipt_url: receiptUrl 
         }])
 
-      if (error) throw error
-      alert('✅ 記錄新增成功！')
+      if (insertError) throw insertError
 
+      // 2. 若為支出且已報銷且有對應員工，自動扣減該員工的預支餘額
+      if (type === 'expense' && isReimbursed && reimburser) {
+        const emp = employees.find(e => e.employee_name === reimburser)
+        if (emp) {
+          const newBalance = emp.balance - numAmount
+          await supabase.from('advances').update({ balance: newBalance }).eq('id', emp.id)
+        }
+      }
+
+      await fetchRecords()
+      await fetchData()
+
+      alert('✅ 記錄新增成功！')
       resetForm()
-      fetchRecords() 
     } catch (error) {
       alert('❌ 發生錯誤：' + error.message)
       console.error('Submit Error:', error)
@@ -172,12 +324,25 @@ function App() {
 
   const handleDelete = async (id) => {
     if (!window.confirm('確定要刪除這筆記錄嗎？')) return
+
+    const target = allRecords.find(r => r.id === id)
+    // 若該記錄原本有進行預支對消，刪除時需將金額退回給該員工的預支餘額
+    if (target && target.advance_deduction_employee && target.advance_deduction_amount > 0) {
+      const emp = employees.find(e => e.employee_name === target.advance_deduction_employee)
+      if (emp) {
+        const restoredBalance = emp.balance + target.advance_deduction_amount
+        await supabase.from('advances').update({ balance: restoredBalance }).eq('id', emp.id)
+      }
+    }
+
     const { error } = await supabase.from('transactions').delete().eq('id', id)
     if (error) alert('刪除失敗：' + error.message)
-    else fetchRecords()
+    else {
+      fetchRecords()
+      fetchData()
+    }
   }
 
-  // 批次勾選單一項目
   const handleSelectOne = (id) => {
     if (selectedIds.includes(id)) {
       setSelectedIds(selectedIds.filter(item => item !== id))
@@ -186,7 +351,6 @@ function App() {
     }
   }
 
-  // 批次全選 / 取消全選
   const handleSelectAll = () => {
     if (selectedIds.length === currentRecords.length) {
       setSelectedIds([])
@@ -195,69 +359,67 @@ function App() {
     }
   }
 
-  // 批次標記狀態
   const handleBatchReimbursed = async (status) => {
     if (selectedIds.length === 0) return
     if (!window.confirm(`確定要將選取的 ${selectedIds.length} 筆記錄更新狀態嗎？`)) return
 
-    const { error } = await supabase
-      .from('transactions')
-      .update({ is_reimbursed: status })
-      .in('id', selectedIds)
-
-    if (error) {
-      alert('批次更新失敗：' + error.message)
-    } else {
-      alert('✅ 成功批次更新狀態！')
-      setSelectedIds([])
-      fetchRecords()
+    for (const id of selectedIds) {
+      const target = allRecords.find(r => r.id === id)
+      if (target && target.type === 'expense') {
+        const emp = employees.find(e => e.employee_name === target.reimburser)
+        if (emp) {
+          if (status && !target.is_reimbursed) {
+            // 從未報銷變為已報銷：扣除預支餘額
+            if (emp.balance >= target.amount) {
+              await supabase.from('advances').update({ balance: emp.balance - target.amount }).eq('id', emp.id)
+              await supabase.from('transactions').update({ is_reimbursed: true, advance_deduction_employee: emp.employee_name, advance_deduction_amount: target.amount }).eq('id', target.id)
+            } else {
+              alert(`⚠️ 員工 ${emp.employee_name} 預支餘額不足，無法批次完成此筆對消！`)
+              continue
+            }
+          } else if (!status && target.is_reimbursed && target.advance_deduction_amount > 0) {
+            // 從已報銷變為未報銷：退回預支餘額
+            await supabase.from('advances').update({ balance: emp.balance + target.advance_deduction_amount }).eq('id', emp.id)
+            await supabase.from('transactions').update({ is_reimbursed: false, advance_deduction_employee: null, advance_deduction_amount: 0 }).eq('id', target.id)
+          }
+        } else {
+          await supabase.from('transactions').update({ is_reimbursed: status }).eq('id', target.id)
+        }
+      }
     }
+
+    alert('✅ 批次狀態更新完成！')
+    setSelectedIds([])
+    fetchRecords()
+    fetchData()
   }
 
-  // 批次更改類別
-  const handleBatchCategoryChange = async () => {
-    if (!batchCategory) {
-      alert('請先選擇要批次變更的類別！')
-      return
-    }
-    if (selectedIds.length === 0) return
-    if (!window.confirm(`確定要將選取的 ${selectedIds.length} 筆記錄類別改為「${batchCategory}」嗎？`)) return
-
-    const { error } = await supabase
-      .from('transactions')
-      .update({ category: batchCategory })
-      .in('id', selectedIds)
-
-    if (error) {
-      alert('批次修改類別失敗：' + error.message)
-    } else {
-      alert('✅ 批次修改類別成功！')
-      setSelectedIds([])
-      setBatchCategory('')
-      fetchRecords()
-    }
-  }
-
-  // 批次刪除
   const handleBatchDelete = async () => {
     if (selectedIds.length === 0) return
-    if (!window.confirm(`⚠️ 確定要刪除選取的 ${selectedIds.length} 筆記錄嗎？此動作無法復原！`)) return
+    if (!window.confirm(`⚠️ 確定要刪除選取的 ${selectedIds.length} 筆記錄嗎？`)) return
 
-    const { error } = await supabase
-      .from('transactions')
-      .delete()
-      .in('id', selectedIds)
+    for (const id of selectedIds) {
+      const target = allRecords.find(r => r.id === id)
+      if (target && target.advance_deduction_employee && target.advance_deduction_amount > 0) {
+        const emp = employees.find(e => e.employee_name === target.advance_deduction_employee)
+        if (emp) {
+          const restoredBalance = emp.balance + target.advance_deduction_amount
+          await supabase.from('advances').update({ balance: restoredBalance }).eq('id', emp.id)
+        }
+      }
+    }
 
+    const { error } = await supabase.from('transactions').delete().in('id', selectedIds)
     if (error) {
       alert('批次刪除失敗：' + error.message)
     } else {
-      alert('✅ 成功批次刪除選取記錄！')
+      alert('✅ 成功批次刪除！')
       setSelectedIds([])
       fetchRecords()
+      fetchData()
     }
   }
 
-  // 啟動歷史記錄中的行內直接編輯
   const handleStartInlineEdit = (record) => {
     setInlineEditingId(record.id)
     setInlineForm({
@@ -274,19 +436,51 @@ function App() {
     })
   }
 
-  // 儲存行內直接編輯的結果
   const handleSaveInlineEdit = async (id) => {
     if (!inlineForm.amount || !inlineForm.category) {
       alert('金額與交易類別不能為空！')
       return
     }
 
+    const originalRecord = allRecords.find(r => r.id === id)
+    const newAmount = parseFloat(inlineForm.amount)
+
     setIsLoading(true)
     try {
+      // 1. 若原本有預支對消，先退回
+      if (originalRecord.advance_deduction_employee) {
+        const oldEmp = employees.find(e => e.employee_name === originalRecord.advance_deduction_employee)
+        if (oldEmp) {
+          await supabase.from('advances').update({ balance: oldEmp.balance + originalRecord.advance_deduction_amount }).eq('id', oldEmp.id)
+        }
+      }
+
+      let finalDeductionEmp = null
+      let finalDeductionAmt = 0
+
+      // 2. 若修改後為支出、已報銷且填了報銷者，進行預支對消扣款
+      if (inlineForm.type === 'expense' && inlineForm.is_reimbursed && inlineForm.reimburser) {
+        const newEmp = employees.find(e => e.employee_name === inlineForm.reimburser)
+        if (newEmp) {
+          const { data: freshEmpData } = await supabase.from('advances').select('*').eq('id', newEmp.id).single()
+          
+          if (freshEmpData.balance < newAmount) {
+            alert(`⚠️ 該員工預支餘額不足！目前餘額：$${freshEmpData.balance.toFixed(2)}`)
+            setIsLoading(false)
+            return
+          }
+
+          finalDeductionEmp = inlineForm.reimburser
+          finalDeductionAmt = newAmount
+
+          await supabase.from('advances').update({ balance: freshEmpData.balance - newAmount }).eq('id', freshEmpData.id)
+        }
+      }
+
       const { error } = await supabase
         .from('transactions')
         .update({
-          amount: parseFloat(inlineForm.amount),
+          amount: newAmount,
           category: inlineForm.category,
           item_name: inlineForm.item_name,
           type: inlineForm.type,
@@ -294,6 +488,8 @@ function App() {
           account_method: inlineForm.type === 'income' ? inlineForm.account_method : null,
           reimburser: inlineForm.type === 'expense' ? inlineForm.reimburser : null,
           reimbursement_method: inlineForm.type === 'expense' ? inlineForm.reimbursement_method : null,
+          advance_deduction_employee: finalDeductionEmp,
+          advance_deduction_amount: finalDeductionAmt,
           remark: inlineForm.remark,
           transaction_date: inlineForm.transaction_date
         })
@@ -304,6 +500,7 @@ function App() {
       alert('✅ 記錄更新成功！')
       setInlineEditingId(null)
       fetchRecords()
+      fetchData()
     } catch (error) {
       alert('❌ 更新失敗：' + error.message)
     } finally {
@@ -350,7 +547,6 @@ function App() {
     }
   }
 
-  // 過濾邏輯（包含收支、類別、狀態篩選）
   const filteredRecords = allRecords.filter(record => {
     const matchCategory = selectedCategoryFilter === 'all' || record.category === selectedCategoryFilter
     const matchType = selectedTypeFilter === 'all' || record.type === selectedTypeFilter
@@ -384,7 +580,184 @@ function App() {
 
       <div className="w-full max-w-lg bg-white rounded-xl shadow-md overflow-hidden p-6">
         
-        {view === 'home' ? (
+        {/* 頂部導覽切換按鈕 */}
+        <div className="flex justify-between items-center mb-6 border-b pb-3">
+          <div className="flex gap-2">
+            <button 
+              onClick={() => setView('home')}
+              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${view === 'home' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              記賬主畫面
+            </button>
+            <button 
+              onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${view === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+            >
+              全部歷史記錄
+            </button>
+          </div>
+          <button 
+            onClick={() => setView('advances')}
+            className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${view === 'advances' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}
+          >
+            👥 員工預支管理
+          </button>
+        </div>
+
+        {view === 'advances' ? (
+          // ================= 員工預支資金管理面板 =================
+          <>
+            <div className="flex justify-between items-center mb-4">
+              <h1 className="text-xl font-bold text-gray-800">員工預支資金管理</h1>
+              <button 
+                onClick={() => setView('home')}
+                className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200"
+              >
+                ← 返回主畫面
+              </button>
+            </div>
+
+            {/* 1. 新增員工 */}
+            <form onSubmit={handleAddEmployee} className="bg-gray-50 p-3 rounded-lg border mb-4 space-y-2">
+              <h2 className="text-xs font-bold text-gray-800">新增員工檔案</h2>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  value={newEmpName}
+                  onChange={(e) => setNewEmpName(e.target.value)}
+                  className="flex-1 border rounded p-1.5 text-xs outline-none bg-white"
+                  placeholder="請輸入員工姓名"
+                />
+                <button type="submit" className="bg-gray-800 hover:bg-gray-900 text-white text-xs px-3 py-1.5 rounded font-bold">
+                  新增員工
+                </button>
+              </div>
+            </form>
+
+            {/* 2. 記錄預支資金 */}
+            <form onSubmit={handleAddAdvanceTransaction} className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 mb-6 space-y-2.5">
+              <h2 className="text-xs font-bold text-indigo-900">新增預支資金記錄</h2>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">選擇員工</label>
+                  <select 
+                    value={selectedEmpIdForAdvance}
+                    onChange={(e) => setSelectedEmpIdForAdvance(e.target.value)}
+                    className="w-full border rounded p-1.5 text-xs bg-white outline-none"
+                  >
+                    <option value="">請選擇員工</option>
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.employee_name} ({emp.status === 'active' ? '正常' : '已停用'})</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">日期</label>
+                  <input 
+                    type="date" 
+                    value={advanceDate}
+                    onChange={(e) => setAdvanceDate(e.target.value)}
+                    className="w-full border rounded p-1.5 text-xs outline-none bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">預支金額 (HKD)</label>
+                  <input 
+                    type="number" 
+                    value={advanceAmt}
+                    onChange={(e) => setAdvanceAmt(e.target.value)}
+                    className="w-full border rounded p-1.5 text-xs outline-none bg-white"
+                    placeholder="0.00"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">預支方式</label>
+                  <select 
+                    value={advanceMethod}
+                    onChange={(e) => setAdvanceMethod(e.target.value)}
+                    className="w-full border rounded p-1.5 text-xs bg-white outline-none text-gray-700"
+                  >
+                    {accountMethodOptions.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-gray-600 mb-0.5">備註</label>
+                <input 
+                  type="text" 
+                  value={advanceRemark}
+                  onChange={(e) => setAdvanceRemark(e.target.value)}
+                  className="w-full border rounded p-1.5 text-xs outline-none bg-white"
+                  placeholder="備註說明（選填）"
+                />
+              </div>
+
+              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 rounded font-bold shadow">
+                記錄預支資金
+              </button>
+            </form>
+
+            {/* 員工狀態與預支餘額總覽 */}
+            <h2 className="text-sm font-bold text-gray-800 mb-2">員工狀態與預支餘額</h2>
+            <div className="space-y-2 mb-6">
+              {employees.length === 0 ? (
+                <p className="text-gray-500 text-center text-xs py-2">尚無員工檔案</p>
+              ) : (
+                employees.map(emp => (
+                  <div key={emp.id} className="bg-gray-50 p-2.5 rounded border flex justify-between items-center text-xs">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-gray-800">{emp.employee_name}</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${emp.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                          {emp.status === 'active' ? '正常' : '已停用'}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-gray-500 mt-0.5">累計預支：${emp.initial_amount.toFixed(2)} | 剩餘餘額：<strong className="text-indigo-600">${emp.balance.toFixed(2)}</strong></p>
+                    </div>
+                    <button 
+                      onClick={() => handleToggleEmployeeStatus(emp)}
+                      className={`px-2 py-1 rounded text-[11px] font-semibold ${emp.status === 'active' ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
+                    >
+                      {emp.status === 'active' ? '停用' : '啟用'}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* 預支資金歷史明細記錄 */}
+            <h2 className="text-sm font-bold text-gray-800 mb-2">預支資金歷史明細記錄</h2>
+            <div className="space-y-2">
+              {advanceDetails.length === 0 ? (
+                <p className="text-gray-500 text-center text-xs py-2">尚無預支明細</p>
+              ) : (
+                advanceDetails.map(det => {
+                  const emp = employees.find(e => e.id === det.employee_id)
+                  return (
+                    <div key={det.id} className="bg-gray-50 p-2.5 rounded border flex justify-between items-center text-xs">
+                      <div>
+                        <p className="font-semibold text-gray-800">{emp ? emp.employee_name : '未知員工'} - <span className="text-indigo-600 font-bold">${det.amount.toFixed(2)}</span> ({det.method})</p>
+                        <p className="text-[10px] text-gray-500">{det.date} {det.remark ? `| 備註：${det.remark}` : ''}</p>
+                      </div>
+                      <button 
+                        onClick={() => handleDeleteAdvanceTransaction(det)}
+                        className="text-red-500 hover:text-red-700 text-[11px] font-semibold bg-red-50 px-2 py-1 rounded"
+                      >
+                        刪除
+                      </button>
+                    </div>
+                  )
+                })
+              )}
+            </div>
+          </>
+        ) : view === 'home' ? (
           // ================= 主畫面：專門用於輸入新交易 =================
           <>
             <h1 className="text-2xl font-bold text-center text-gray-800 mb-2">公司記賬系統</h1>
@@ -510,16 +883,23 @@ function App() {
                       此筆交易已報銷
                     </label>
                   </div>
+
                   <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">報銷者</label>
-                    <input 
-                      type="text" 
+                    <label className="block text-xs font-medium text-gray-600 mb-1">報銷者（預支對消員工）</label>
+                    <select 
                       value={reimburser}
                       onChange={(e) => setReimburser(e.target.value)}
-                      className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-blue-500"
-                      placeholder="請輸入報銷人姓名"
-                    />
+                      className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700"
+                    >
+                      <option value="">請選擇報銷者</option>
+                      {employees.map(emp => (
+                        <option key={emp.id} value={emp.employee_name}>
+                          {emp.employee_name} {emp.status === 'active' ? `(預支餘額: $${emp.balance.toFixed(2)})` : '(已停用)'}
+                        </option>
+                      ))}
+                    </select>
                   </div>
+
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">報銷方式</label>
                     <select 
@@ -533,6 +913,7 @@ function App() {
                       ))}
                     </select>
                   </div>
+
                   <div>
                     <label className="block text-xs font-medium text-gray-600 mb-1">備註</label>
                     <input 
@@ -600,7 +981,7 @@ function App() {
                             ) : (
                               record.is_reimbursed && (
                                 <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">
-                                  已報銷 {record.reimburser ? `[${record.reimburser}]` : ''} {record.reimbursement_method ? `(${record.reimbursement_method})` : ''}
+                                  已報銷 {record.reimburser ? `[報銷者: ${record.reimburser}]` : ''} {record.reimbursement_method ? `(${record.reimbursement_method})` : ''}
                                 </span>
                               )
                             )}
@@ -632,14 +1013,6 @@ function App() {
                   ))
                 )}
               </div>
-              {allRecords.length > 5 && (
-                <button 
-                  onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
-                  className="w-full mt-4 bg-gray-100 text-gray-700 py-2 rounded-lg font-semibold text-sm hover:bg-gray-200 transition-colors"
-                >
-                  查看全部 {allRecords.length} 筆歷史記錄
-                </button>
-              )}
             </div>
           </>
         ) : (
@@ -648,7 +1021,7 @@ function App() {
             <div className="flex justify-between items-center mb-6">
               <button 
                 onClick={() => { setSelectedIds(); setInlineEditingId(null); setView('home'); }}
-                className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors"
+                className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200"
               >
                 ← 返回主畫面新增
               </button>
@@ -670,7 +1043,7 @@ function App() {
                     setSelectedIds([])
                     setInlineEditingId(null)
                   }}
-                  className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700 w-48"
+                  className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none w-48 text-gray-700"
                 >
                   <option value="all">全部收支</option>
                   <option value="income">入數 (收入)</option>
@@ -691,7 +1064,7 @@ function App() {
                       setSelectedIds([])
                       setInlineEditingId(null)
                     }}
-                    className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700 w-48"
+                    className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none w-48 text-gray-700"
                   >
                     <option value="all">全部狀態</option>
                     <option value="completed">{selectedTypeFilter === 'income' ? '已入賬' : '已報銷'}</option>
@@ -710,7 +1083,7 @@ function App() {
                     setSelectedIds([])
                     setInlineEditingId(null)
                   }}
-                  className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700 w-48"
+                  className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none w-48 text-gray-700"
                 >
                   <option value="all">全部類別</option>
                   {currentCategoryFilterOptions.map((cat) => (
@@ -723,13 +1096,8 @@ function App() {
             {/* 批次操作控制列 */}
             <div className="mb-4 bg-blue-50 border border-blue-200 p-3 rounded-lg">
               <div className="flex justify-between items-center mb-2">
-                <span className="text-xs font-bold text-blue-800">
-                  已選取 {selectedIds.length} 筆記錄
-                </span>
-                <button
-                  onClick={handleSelectAll}
-                  className="text-xs text-blue-600 underline font-semibold"
-                >
+                <span className="text-xs font-bold text-blue-800">已選取 {selectedIds.length} 筆記錄</span>
+                <button onClick={handleSelectAll} className="text-xs text-blue-600 underline font-semibold">
                   {selectedIds.length === currentRecords.length ? '取消本頁全選' : '本頁全選'}
                 </button>
               </div>
@@ -737,43 +1105,9 @@ function App() {
               {selectedIds.length > 0 && (
                 <div className="flex flex-col gap-2 pt-2 border-t border-blue-200">
                   <div className="flex gap-2">
-                    <button
-                      onClick={() => handleBatchReimbursed(true)}
-                      className="flex-1 bg-green-600 hover:bg-green-700 text-white text-xs py-1.5 px-2 rounded font-semibold transition-colors"
-                    >
-                      設為完成狀態
-                    </button>
-                    <button
-                      onClick={() => handleBatchReimbursed(false)}
-                      className="flex-1 bg-gray-600 hover:bg-gray-700 text-white text-xs py-1.5 px-2 rounded font-semibold transition-colors"
-                    >
-                      取消狀態
-                    </button>
-                    <button
-                      onClick={handleBatchDelete}
-                      className="bg-red-500 hover:bg-red-600 text-white text-xs py-1.5 px-3 rounded font-semibold transition-colors"
-                    >
-                      刪除
-                    </button>
-                  </div>
-
-                  <div className="flex gap-2 items-center mt-1">
-                    <select
-                      value={batchCategory}
-                      onChange={(e) => setBatchCategory(e.target.value)}
-                      className="flex-1 border border-blue-300 rounded p-1 text-xs bg-white outline-none"
-                    >
-                      <option value="">批次改類別...</option>
-                      {currentCategoryFilterOptions.map((cat) => (
-                        <option key={cat} value={cat}>{cat}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={handleBatchCategoryChange}
-                      className="bg-blue-600 hover:bg-blue-700 text-white text-xs py-1.5 px-3 rounded font-semibold transition-colors"
-                    >
-                      確認更改
-                    </button>
+                    <button onClick={() => handleBatchReimbursed(true)} className="flex-1 bg-green-600 text-white text-xs py-1.5 rounded font-semibold">設為完成狀態</button>
+                    <button onClick={() => handleBatchReimbursed(false)} className="flex-1 bg-gray-600 text-white text-xs py-1.5 rounded font-semibold">取消狀態</button>
+                    <button onClick={handleBatchDelete} className="bg-red-500 text-white text-xs py-1.5 px-3 rounded font-semibold">刪除</button>
                   </div>
                 </div>
               )}
@@ -788,10 +1122,7 @@ function App() {
                   const isInlineEditing = inlineEditingId === record.id
 
                   return (
-                    <div 
-                      key={record.id} 
-                      className={`p-3 rounded-lg border transition-colors flex flex-col gap-2 ${isChecked ? 'bg-blue-50 border-blue-300' : (isInlineEditing ? 'bg-amber-50/40 border-amber-300' : 'bg-gray-50 border-gray-100')}`}
-                    >
+                    <div key={record.id} className={`p-3 rounded-lg border transition-colors flex flex-col gap-2 ${isChecked ? 'bg-blue-50 border-blue-300' : (isInlineEditing ? 'bg-amber-50/40 border-amber-300' : 'bg-gray-50 border-gray-100')}`}>
                       {isInlineEditing ? (
                         // ================= 行內編輯狀態 =================
                         <div className="space-y-3 bg-white p-3 rounded-lg border border-amber-300">
@@ -823,7 +1154,7 @@ function App() {
                                 type="number" 
                                 value={inlineForm.amount}
                                 onChange={(e) => setInlineForm({ ...inlineForm, amount: e.target.value })}
-                                className="w-full border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-blue-500"
+                                className="w-full border rounded p-1.5 text-sm outline-none"
                               />
                             </div>
                             <div className="flex-1">
@@ -831,7 +1162,7 @@ function App() {
                               <select 
                                 value={inlineForm.category}
                                 onChange={(e) => setInlineForm({ ...inlineForm, category: e.target.value })}
-                                className="w-full border border-gray-300 rounded p-1.5 text-sm outline-none bg-white focus:border-blue-500"
+                                className="w-full border rounded p-1.5 text-sm outline-none bg-white"
                               >
                                 <option value="" disabled>請選擇</option>
                                 {(inlineForm.type === 'income' ? incomeCategories : expenseCategories).map((cat) => (
@@ -847,8 +1178,7 @@ function App() {
                               type="text" 
                               value={inlineForm.item_name}
                               onChange={(e) => setInlineForm({ ...inlineForm, item_name: e.target.value })}
-                              className="w-full border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-blue-500"
-                              placeholder="例如：導師費、教材材料費"
+                              className="w-full border rounded p-1.5 text-sm outline-none"
                             />
                           </div>
 
@@ -859,7 +1189,7 @@ function App() {
                                 type="date" 
                                 value={inlineForm.transaction_date}
                                 onChange={(e) => setInlineForm({ ...inlineForm, transaction_date: e.target.value })}
-                                className="w-full border border-gray-300 rounded p-1.5 text-xs outline-none focus:border-blue-500"
+                                className="w-full border rounded p-1.5 text-xs outline-none"
                               />
                             </div>
                             <div className="flex items-center gap-1.5 pt-4">
@@ -868,7 +1198,7 @@ function App() {
                                 id={`inline-reimbursed-${record.id}`}
                                 checked={inlineForm.is_reimbursed}
                                 onChange={(e) => setInlineForm({ ...inlineForm, is_reimbursed: e.target.checked })}
-                                className="w-4 h-4 text-blue-600 rounded border-gray-300"
+                                className="w-4 h-4 text-blue-600 rounded border"
                               />
                               <label htmlFor={`inline-reimbursed-${record.id}`} className="text-xs text-gray-700 cursor-pointer">
                                 {inlineForm.type === 'income' ? '已入賬' : '已報銷'}
@@ -882,7 +1212,7 @@ function App() {
                               <select 
                                 value={inlineForm.account_method}
                                 onChange={(e) => setInlineForm({ ...inlineForm, account_method: e.target.value })}
-                                className="w-full border border-gray-300 rounded p-1.5 text-xs bg-white outline-none focus:border-green-500 text-gray-700"
+                                className="w-full border rounded p-1.5 text-xs bg-white outline-none text-gray-700"
                               >
                                 <option value="">請選擇入賬方式</option>
                                 {accountMethodOptions.map((method) => (
@@ -894,20 +1224,23 @@ function App() {
                             <div className="space-y-2">
                               <div>
                                 <label className="block text-[10px] text-gray-500 mb-0.5">報銷者</label>
-                                <input 
-                                  type="text" 
+                                <select 
                                   value={inlineForm.reimburser}
                                   onChange={(e) => setInlineForm({ ...inlineForm, reimburser: e.target.value })}
-                                  className="w-full border border-gray-300 rounded p-1.5 text-xs outline-none focus:border-blue-500"
-                                  placeholder="報銷人姓名"
-                                />
+                                  className="w-full border rounded p-1.5 text-xs bg-white outline-none text-gray-700"
+                                >
+                                  <option value="">請選擇報銷者</option>
+                                  {employees.map(emp => (
+                                    <option key={emp.id} value={emp.employee_name}>{emp.employee_name}</option>
+                                  ))}
+                                </select>
                               </div>
                               <div>
                                 <label className="block text-[10px] text-gray-500 mb-0.5">報銷方式</label>
                                 <select 
                                   value={inlineForm.reimbursement_method}
                                   onChange={(e) => setInlineForm({ ...inlineForm, reimbursement_method: e.target.value })}
-                                  className="w-full border border-gray-300 rounded p-1.5 text-xs bg-white outline-none focus:border-blue-500 text-gray-700"
+                                  className="w-full border rounded p-1.5 text-xs bg-white outline-none text-gray-700"
                                 >
                                   <option value="">請選擇報銷方式</option>
                                   {accountMethodOptions.map((method) => (
@@ -924,25 +1257,13 @@ function App() {
                               type="text" 
                               value={inlineForm.remark}
                               onChange={(e) => setInlineForm({ ...inlineForm, remark: e.target.value })}
-                              className="w-full border border-gray-300 rounded p-1.5 text-sm outline-none focus:border-blue-500"
-                              placeholder="備註事項"
+                              className="w-full border rounded p-1.5 text-sm outline-none"
                             />
                           </div>
 
                           <div className="flex gap-2 pt-1">
-                            <button
-                              onClick={() => handleSaveInlineEdit(record.id)}
-                              disabled={isLoading}
-                              className="flex-1 bg-amber-600 hover:bg-amber-700 text-white text-xs py-2 rounded font-bold shadow transition-colors"
-                            >
-                              {isLoading ? '儲存中...' : '儲存修改'}
-                            </button>
-                            <button
-                              onClick={() => setInlineEditingId(null)}
-                              className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs py-2 rounded font-bold transition-colors"
-                            >
-                              取消
-                            </button>
+                            <button onClick={() => handleSaveInlineEdit(record.id)} disabled={isLoading} className="flex-1 bg-amber-600 text-white text-xs py-2 rounded font-bold">儲存修改</button>
+                            <button onClick={() => setInlineEditingId(null)} className="flex-1 bg-gray-200 text-gray-700 text-xs py-2 rounded font-bold">取消</button>
                           </div>
                         </div>
                       ) : (
@@ -954,7 +1275,7 @@ function App() {
                                 type="checkbox"
                                 checked={isChecked}
                                 onChange={() => handleSelectOne(record.id)}
-                                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer shrink-0"
+                                className="w-4 h-4 text-blue-600 rounded border cursor-pointer shrink-0"
                               />
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 flex-wrap">
@@ -971,7 +1292,7 @@ function App() {
                                   ) : (
                                     record.is_reimbursed && (
                                       <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">
-                                        已報銷 {record.reimburser ? `[${record.reimburser}]` : ''} {record.reimbursement_method ? `(${record.reimbursement_method})` : ''}
+                                        已報銷 {record.reimburser ? `[報銷者: ${record.reimburser}]` : ''} {record.reimbursement_method ? `(${record.reimbursement_method})` : ''}
                                       </span>
                                     )
                                   )}
@@ -981,33 +1302,20 @@ function App() {
                               </div>
                             </div>
 
-                            {/* 金額在上方，修改與刪除按鈕分開上下兩行排在下方 */}
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
                               <div className={`font-bold w-32 text-right ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
                                 {record.type === 'income' ? '+' : '-'}${Number(record.amount).toFixed(2)}
                               </div>
                               <div className="flex gap-2">
-                                <button 
-                                  onClick={() => handleStartInlineEdit(record)}
-                                  className="text-blue-500 hover:text-blue-700 text-xs font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
-                                >
-                                  修改
-                                </button>
-                                <button 
-                                  onClick={() => handleDelete(record.id)}
-                                  className="text-red-400 hover:text-red-600 text-xs font-medium px-2 py-1 rounded bg-red-50 hover:bg-red-100"
-                                >
-                                  刪除
-                                </button>
+                                <button onClick={() => handleStartInlineEdit(record)} className="text-blue-500 text-xs font-medium px-2 py-1 rounded bg-blue-50">修改</button>
+                                <button onClick={() => handleDelete(record.id)} className="text-red-400 text-xs font-medium px-2 py-1 rounded bg-red-50">刪除</button>
                               </div>
                             </div>
                           </div>
 
                           <div className="flex justify-between items-center text-xs pl-7 pt-1">
                             {record.receipt_url ? (
-                              <a href={record.receipt_url} target="_blank" rel="noreferrer" className="text-blue-600 underline">
-                                查看收據相片 📷
-                              </a>
+                              <a href={record.receipt_url} target="_blank" rel="noreferrer" className="text-blue-600 underline">查看收據相片 📷</a>
                             ) : (
                               <span className="text-gray-400">無收據</span>
                             )}
@@ -1016,7 +1324,7 @@ function App() {
                                 setUploadingRecordId(record.id)
                                 if (historyFileInputRef.current) historyFileInputRef.current.click()
                               }}
-                              className="text-indigo-600 hover:text-indigo-800 font-medium bg-indigo-50 px-2 py-1 rounded"
+                              className="text-indigo-600 font-medium bg-indigo-50 px-2 py-1 rounded"
                             >
                               {record.receipt_url ? '更換收據' : '＋ 上傳收據'}
                             </button>
@@ -1031,24 +1339,10 @@ function App() {
 
             {/* 分頁按鈕控制列 */}
             {totalPages > 1 && (
-              <div className="flex justify-between items-center mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
-                <button
-                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
-                  disabled={currentPage === 1}
-                  className="px-3 py-1.5 bg-white border border-gray-300 rounded text-sm font-semibold text-gray-700 disabled:opacity-40 hover:bg-gray-100"
-                >
-                  ← 上一頁
-                </button>
-                <span className="text-sm font-medium text-gray-600">
-                  第 {currentPage} 頁 / 共 {totalPages} 頁
-                </span>
-                <button
-                  onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
-                  disabled={currentPage === totalPages}
-                  className="px-3 py-1.5 bg-white border border-gray-300 rounded text-sm font-semibold text-gray-700 disabled:opacity-40 hover:bg-gray-100"
-                >
-                  下一頁 →
-                </button>
+              <div className="flex justify-between items-center mb-4 bg-gray-50 p-3 rounded-lg border">
+                <button onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-3 py-1.5 bg-white border rounded text-sm font-semibold disabled:opacity-40">← 上一頁</button>
+                <span className="text-sm font-medium text-gray-600">第 {currentPage} 頁 / 共 {totalPages} 頁</span>
+                <button onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border rounded text-sm font-semibold disabled:opacity-40">下一頁 →</button>
               </div>
             )}
           </>
