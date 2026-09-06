@@ -5,6 +5,7 @@ function App() {
   const [type, setType] = useState('expense')
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('')
+  const [itemName, setItemName] = useState('')
   const [transactionDate, setTransactionDate] = useState(new Date().toISOString().split('T')[0])
   const [file, setFile] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -13,10 +14,16 @@ function App() {
   const [view, setView] = useState('home')
   const [editingId, setEditingId] = useState(null)
   
+  // 分頁狀態：目前頁碼
+  const [currentPage, setCurrentPage] = useState(1)
+  const recordsPerPage = 5
+
   const fileInputRef = useRef(null)
 
+  // 可選的交易類別清單
+  const categoryOptions = ['交通', '飲食', '雜項', '娛樂', '薪資', '投資', '其他']
+
   const fetchRecords = async () => {
-    // 依交易日期由新到舊排序，若日期相同則依 ID 由新到舊排序
     const { data, error } = await supabase
       .from('transactions')
       .select('*')
@@ -42,28 +49,44 @@ function App() {
 
   const handleEditClick = (record) => {
     setEditingId(record.id)
-    setType(record.type)
-    setAmount(record.amount)
-    setCategory(record.category)
+    setType(record.type || 'expense')
+    setAmount(record.amount !== undefined ? record.amount : '')
+    const matchedCategory = categoryOptions.includes(record.category) ? record.category : ''
+    setCategory(matchedCategory)
+    setItemName(record.item_name || '')
     const cleanDate = record.transaction_date ? record.transaction_date.toString().split('T')[0] : new Date().toISOString().split('T')[0]
     setTransactionDate(cleanDate)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const handleCancelEdit = () => {
+  // 確保每次提交或取消時，強制重設所有表單欄位與編輯狀態
+  const resetForm = () => {
     setEditingId(null)
+    setType('expense')
     setAmount('')
     setCategory('')
+    setItemName('')
     setTransactionDate(new Date().toISOString().split('T')[0])
     setFile(null)
-    if (fileInputRef.current) fileInputRef.current.value = ''
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }
+
+  const handleCancelEdit = () => {
+    resetForm()
   }
 
   const handleSubmit = async () => {
-    if (!amount || !category) {
-      alert('請輸入金額和類別！')
+    if (!amount) {
+      alert('請輸入金額！')
       return
     }
+    if (!category) {
+      alert('請選擇交易類別！')
+      return
+    }
+
     setIsLoading(true)
     
     try {
@@ -89,6 +112,7 @@ function App() {
           type, 
           amount: parseFloat(amount), 
           category,
+          item_name: itemName,
           transaction_date: transactionDate 
         }
         if (receiptUrl) updatePayload.receipt_url = receiptUrl
@@ -107,6 +131,7 @@ function App() {
             type, 
             amount: parseFloat(amount), 
             category,
+            item_name: itemName,
             transaction_date: transactionDate,
             receipt_url: receiptUrl 
           }])
@@ -115,15 +140,8 @@ function App() {
         alert('✅ 記錄新增成功！')
       }
 
-      setEditingId(null)
-      setAmount('')
-      setCategory('')
-      setTransactionDate(new Date().toISOString().split('T')[0])
-      setFile(null)
-      if (fileInputRef.current) {
-        fileInputRef.current.value = ''
-      }
-
+      // 確實執行表單重設，解鎖所有輸入框
+      resetForm()
       fetchRecords() 
     } catch (error) {
       alert('❌ 發生錯誤：' + error.message)
@@ -139,6 +157,12 @@ function App() {
     if (error) alert('刪除失敗：' + error.message)
     else fetchRecords()
   }
+
+  // 計算分頁資料
+  const indexOfLastRecord = currentPage * recordsPerPage
+  const indexOfFirstRecord = indexOfLastRecord - recordsPerPage
+  const currentRecords = allRecords.slice(indexOfFirstRecord, indexOfLastRecord)
+  const totalPages = Math.ceil(allRecords.length / recordsPerPage) || 1
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 font-sans flex justify-center items-start pt-10 pb-10">
@@ -190,13 +214,27 @@ function App() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">類別 / 商戶名稱</label>
-                <input 
-                  type="text" 
+                <label className="block text-sm font-medium text-gray-700 mb-1">交易類別 <span className="text-red-500">*</span></label>
+                <select 
                   value={category}
                   onChange={(e) => setCategory(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg p-3 focus:border-blue-500 outline-none bg-white text-gray-700"
+                >
+                  <option value="" disabled>請選擇類別 (必選)</option>
+                  {categoryOptions.map((cat) => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">商品 / 品名名稱</label>
+                <input 
+                  type="text" 
+                  value={itemName}
+                  onChange={(e) => setItemName(e.target.value)}
                   className="w-full border border-gray-300 rounded-lg p-3 focus:border-blue-500 outline-none"
-                  placeholder="例如：牛牛小廚、紅茶、餐飲"
+                  placeholder="例如：地鐵車費、午餐、文具"
                 />
               </div>
 
@@ -235,7 +273,7 @@ function App() {
                 <h2 className="text-lg font-bold text-gray-800">最新記錄 (最近5筆)</h2>
                 {allRecords.length > 5 && (
                   <button 
-                    onClick={() => setView('all')}
+                    onClick={() => { setCurrentPage(1); setView('all'); }}
                     className="text-sm text-blue-600 font-semibold hover:underline"
                   >
                     查看全部 →
@@ -250,8 +288,13 @@ function App() {
                     <div key={record.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100 flex flex-col gap-2">
                       <div className="flex justify-between items-center">
                         <div>
-                          <p className="font-medium text-gray-800">{record.category}</p>
-                          <p className="text-xs text-gray-500">{record.transaction_date}</p>
+                          <div className="flex items-center gap-2">
+                            {record.category && (
+                              <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
+                            )}
+                            <span className="font-medium text-gray-800">{record.item_name || '未填寫品名'}</span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
                         </div>
                         <div className="flex items-center gap-2">
                           <div className={`font-bold ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
@@ -284,7 +327,7 @@ function App() {
               </div>
               {allRecords.length > 5 && (
                 <button 
-                  onClick={() => setView('all')}
+                  onClick={() => { setCurrentPage(1); setView('all'); }}
                   className="w-full mt-4 bg-gray-100 text-gray-700 py-2 rounded-lg font-semibold text-sm hover:bg-gray-200 transition-colors"
                 >
                   查看全部 {allRecords.length} 筆歷史記錄
@@ -293,7 +336,7 @@ function App() {
             </div>
           </>
         ) : (
-          // ================= 全部記錄頁面 =================
+          // ================= 全部記錄頁面 (具備分頁功能) =================
           <>
             <div className="flex justify-between items-center mb-6">
               <button 
@@ -306,16 +349,21 @@ function App() {
               <div className="w-16"></div>
             </div>
 
-            <div className="space-y-3">
-              {allRecords.length === 0 ? (
+            <div className="space-y-3 mb-6">
+              {currentRecords.length === 0 ? (
                 <p className="text-gray-500 text-center text-sm">目前尚無記錄</p>
               ) : (
-                allRecords.map((record) => (
+                currentRecords.map((record) => (
                   <div key={record.id} className="bg-gray-50 p-3 rounded-lg border border-gray-100 flex flex-col gap-2">
                     <div className="flex justify-between items-center">
                       <div>
-                        <p className="font-medium text-gray-800">{record.category}</p>
-                        <p className="text-xs text-gray-500">{record.transaction_date}</p>
+                        <div className="flex items-center gap-2">
+                          {record.category && (
+                            <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
+                          )}
+                          <span className="font-medium text-gray-800">{record.item_name || '未填寫品名'}</span>
+                        </div>
+                        <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <div className={`font-bold ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
@@ -347,9 +395,32 @@ function App() {
               )}
             </div>
 
+            {/* 分頁按鈕控制列 */}
+            {totalPages > 1 && (
+              <div className="flex justify-between items-center mb-6 bg-gray-50 p-3 rounded-lg border border-gray-200">
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-3 py-1.5 bg-white border border-gray-300 rounded text-sm font-semibold text-gray-700 disabled:opacity-40 hover:bg-gray-100"
+                >
+                  ← 上一頁
+                </button>
+                <span className="text-sm font-medium text-gray-600">
+                  第 {currentPage} 頁 / 共 {totalPages} 頁
+                </span>
+                <button
+                  onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="px-3 py-1.5 bg-white border border-gray-300 rounded text-sm font-semibold text-gray-700 disabled:opacity-40 hover:bg-gray-100"
+                >
+                  下一頁 →
+                </button>
+              </div>
+            )}
+
             <button 
               onClick={() => setView('home')}
-              className="w-full mt-6 bg-blue-600 text-white py-3 rounded-lg font-bold text-center shadow hover:bg-blue-700 transition-colors"
+              className="w-full bg-blue-600 text-white py-3 rounded-lg font-bold text-center shadow hover:bg-blue-700 transition-colors"
             >
               返回主頁新增記錄
             </button>
