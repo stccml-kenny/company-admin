@@ -80,9 +80,6 @@ function App() {
 
   const currentCategoryFilterOptions = getDynamicCategoryFilterOptions()
 
-  // 宣告 activeEmployees 確保全元件可正確取用
-  const activeEmployees = employees.filter(e => e.status === 'active')
-
   // 載入交易記錄
   const fetchRecords = async () => {
     const { data, error } = await supabase
@@ -143,13 +140,13 @@ function App() {
     }
   }
 
-  // 手動更新數據按鈕觸發函數
+  // 更新數據按鈕：不僅更新數據，也讓頁面重新整理 (Refresh)
   const handleRefreshData = async () => {
     setIsLoading(true)
     const records = await fetchRecords()
     await fetchData(records)
     setIsLoading(false)
-    alert('🔄 數據已成功更新！')
+    window.location.reload()
   }
 
   useEffect(() => {
@@ -244,7 +241,7 @@ function App() {
     }
   }
 
-  // 提交支付薪金
+  // 提交支付薪金：保持在支付薪金版面，並將選擇員工、金額、發放方式、發放日期與備註全部還原至預設值
   const handlePaySalary = async (e) => {
     e.preventDefault()
     if (!salaryEmployee || !salaryAmount) {
@@ -273,12 +270,16 @@ function App() {
       if (error) throw error
 
       alert(`✅ 成功向 ${salaryEmployee} 支付薪金 $${numAmt.toFixed(2)}！`)
+      
+      // 還原所有輸入欄位至預設值
+      setSalaryEmployee('')
       setSalaryAmount('')
+      setSalaryMethod('銀行轉賬')
+      setSalaryDate(new Date().toISOString().split('T')[0])
       setSalaryRemark('')
       
       const records = await fetchRecords()
       await fetchData(records)
-      setView('home')
     } catch (err) {
       alert('❌ 支付薪金失敗：' + err.message)
     } finally {
@@ -568,6 +569,7 @@ function App() {
   const totalPages = Math.ceil(filteredRecords.length / recordsPerPage) || 1
 
   const accountMethodOptions = ['轉賬匯款', '銀行轉賬', '支票', '現金']
+  const activeEmployees = employees.filter(e => e.status === 'active')
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 font-sans flex justify-center items-start pt-10 pb-10">
@@ -620,7 +622,7 @@ function App() {
               disabled={isLoading}
               className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded-lg font-semibold shadow transition-colors flex items-center gap-1 disabled:opacity-50"
             >
-              {isLoading ? '更新中...' : '🔄 更新數據 (Refresh)'}
+              {isLoading ? '更新中...' : '🔄 更新數據'}
             </button>
           </div>
         </div>
