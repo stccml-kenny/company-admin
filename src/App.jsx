@@ -33,7 +33,7 @@ function App() {
   // 薪金支付版面的互動狀態
   const [salaryEmployee, setSalaryEmployee] = useState('')
   const [salaryAmount, setSalaryAmount] = useState('')
-  const [salaryMethod, setSalaryMethod] = useState('銀行轉賬')
+  const [salaryMethod, setSalaryMethod] = useState('')
   const [salaryDate, setSalaryDate] = useState(new Date().toISOString().split('T')[0])
   const [salaryRemark, setSalaryRemark] = useState('')
 
@@ -178,19 +178,27 @@ function App() {
     }
   }
 
-  // 切換員工狀態
-  const handleToggleEmployeeStatus = async (emp) => {
-    const nextStatus = emp.status === 'active' ? 'inactive' : 'active'
-    const { error } = await supabase
-      .from('advances')
-      .update({ status: nextStatus })
-      .eq('id', emp.id)
+  // 員工狀態管理：改為離職
+  const handleMarkResigned = async (emp) => {
+    if (!window.confirm(`確定要將員工「${emp.employee_name}」設為離職狀態嗎？`)) return
+    const { error } = await supabase.from('advances').update({ status: 'resigned' }).eq('id', emp.id)
+    if (error) alert('更新狀態失敗：' + error.message)
+    else fetchData()
+  }
 
-    if (error) {
-      alert('狀態更新失敗：' + error.message)
-    } else {
-      fetchData()
-    }
+  // 員工狀態管理：刪除員工記錄
+  const handleDeleteEmployee = async (emp) => {
+    if (!window.confirm(`⚠️ 確定要永久刪除員工「${emp.employee_name}」及其所有預支記錄嗎？此動作無法復原！`)) return
+    const { error } = await supabase.from('advances').delete().eq('id', emp.id)
+    if (error) alert('刪除員工失敗：' + error.message)
+    else fetchData()
+  }
+
+  // 員工狀態管理：恢復正常
+  const handleRestoreEmployee = async (emp) => {
+    const { error } = await supabase.from('advances').update({ status: 'active' }).eq('id', emp.id)
+    if (error) alert('狀態更新失敗：' + error.message)
+    else fetchData()
   }
 
   // 新增預支資金明細
@@ -241,7 +249,7 @@ function App() {
     }
   }
 
-  // 提交支付薪金：保持在支付薪金版面，並將選擇員工、金額、發放方式、發放日期與備註全部還原至預設值
+  // 提交支付薪金
   const handlePaySalary = async (e) => {
     e.preventDefault()
     if (!salaryEmployee || !salaryAmount) {
@@ -271,10 +279,9 @@ function App() {
 
       alert(`✅ 成功向 ${salaryEmployee} 支付薪金 $${numAmt.toFixed(2)}！`)
       
-      // 還原所有輸入欄位至預設值
       setSalaryEmployee('')
       setSalaryAmount('')
-      setSalaryMethod('銀行轉賬')
+      setSalaryMethod('')
       setSalaryDate(new Date().toISOString().split('T')[0])
       setSalaryRemark('')
       
@@ -600,19 +607,20 @@ function App() {
                 全部歷史
               </button>
             </div>
-            <div className="flex gap-1.5">
-              <button 
-                onClick={() => setView('salary')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'salary' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+
+            {/* 管理項目子目錄選單 */}
+            <div className="flex items-center gap-2">
+              <select
+                value={view === 'salary' || view === 'advances' ? view : ''}
+                onChange={(e) => {
+                  if (e.target.value) setView(e.target.value)
+                }}
+                className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-bold outline-none cursor-pointer hover:bg-indigo-100 transition-colors"
               >
-                💰 支付薪金
-              </button>
-              <button 
-                onClick={() => setView('advances')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'advances' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}
-              >
-                👥 預支管理
-              </button>
+                <option value="" disabled>⚙️ 管理項目...</option>
+                <option value="salary">💰 支付薪金</option>
+                <option value="advances">👥 預支管理</option>
+              </select>
             </div>
           </div>
 
@@ -673,6 +681,7 @@ function App() {
                   onChange={(e) => setSalaryMethod(e.target.value)}
                   className="w-full border rounded p-2 text-sm bg-white outline-none text-gray-700"
                 >
+                  <option value="">請選擇支付方式</option>
                   {accountMethodOptions.map(m => (
                     <option key={m} value={m}>{m}</option>
                   ))}
@@ -750,7 +759,7 @@ function App() {
                   >
                     <option value="">請選擇員工</option>
                     {employees.map(emp => (
-                      <option key={emp.id} value={emp.id}>{emp.employee_name} ({emp.status === 'active' ? '正常' : '已停用'})</option>
+                      <option key={emp.id} value={emp.id}>{emp.employee_name} ({emp.status === 'active' ? '正常' : '已離職/停用'})</option>
                     ))}
                   </select>
                 </div>
@@ -817,17 +826,38 @@ function App() {
                       <div className="flex items-center gap-2">
                         <span className="font-bold text-gray-800">{emp.employee_name}</span>
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${emp.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                          {emp.status === 'active' ? '正常' : '已停用'}
+                          {emp.status === 'active' ? '正常' : '已離職/停用'}
                         </span>
                       </div>
                       <p className="text-[11px] text-gray-500 mt-0.5">累計預支：${emp.initial_amount.toFixed(2)} | 剩餘餘額：<strong className="text-indigo-600">${emp.balance.toFixed(2)}</strong></p>
                     </div>
-                    <button 
-                      onClick={() => handleToggleEmployeeStatus(emp)}
-                      className={`px-2 py-1 rounded text-[11px] font-semibold ${emp.status === 'active' ? 'bg-red-50 text-red-600 hover:bg-red-100' : 'bg-green-50 text-green-600 hover:bg-green-100'}`}
-                    >
-                      {emp.status === 'active' ? '停用' : '啟用'}
-                    </button>
+
+                    {/* 改進的按鈕群組：點擊即可直接執行離職、刪除或恢復正常 */}
+                    <div className="flex gap-1">
+                      {emp.status === 'active' ? (
+                        <>
+                          <button 
+                            onClick={() => handleMarkResigned(emp)}
+                            className="bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11px] font-semibold px-2 py-1 rounded"
+                          >
+                            設為離職
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteEmployee(emp)}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold px-2 py-1 rounded"
+                          >
+                            刪除
+                          </button>
+                        </>
+                      ) : (
+                        <button 
+                          onClick={() => handleRestoreEmployee(emp)}
+                          className="bg-green-50 hover:bg-green-100 text-green-600 text-[11px] font-semibold px-2 py-1 rounded"
+                        >
+                          恢復正常
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -1013,7 +1043,7 @@ function App() {
                           <option value="">請選擇報銷者</option>
                           {employees.map(emp => (
                             <option key={emp.id} value={emp.employee_name}>
-                              {emp.employee_name} {emp.status === 'active' ? `(預支餘額: $${emp.balance.toFixed(2)})` : '(已停用)'}
+                              {emp.employee_name} {emp.status === 'active' ? `(預支餘額: $${emp.balance.toFixed(2)})` : '(已離職/停用)'}
                             </option>
                           ))}
                         </select>
