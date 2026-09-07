@@ -20,7 +20,7 @@ function App() {
   const [employees, setEmployees] = useState([]) // 員工預支列表
   const [advanceDetails, setAdvanceDetails] = useState([]) // 所有預支明細記錄
   const [balance, setBalance] = useState(0)
-  const [view, setView] = useState('home') // 'home' | 'all' | 'advances'
+  const [view, setView] = useState('home') // 'home' | 'all' | 'advances' | 'salary'
   
   // 員工預支管理頁面的互動狀態
   const [newEmpName, setNewEmpName] = useState('')
@@ -30,10 +30,18 @@ function App() {
   const [advanceMethod, setAdvanceMethod] = useState('銀行轉賬')
   const [advanceRemark, setAdvanceRemark] = useState('')
 
+  // 薪金支付版面的互動狀態
+  const [salaryEmployee, setSalaryEmployee] = useState('')
+  const [salaryAmount, setSalaryAmount] = useState('')
+  const [salaryMethod, setSalaryMethod] = useState('銀行轉賬')
+  const [salaryDate, setSalaryDate] = useState(new Date().toISOString().split('T')[0])
+  const [salaryRemark, setSalaryRemark] = useState('')
+
   // 篩選與分頁狀態
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all')
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('all') 
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all') 
+  const [searchText, setSearchText] = useState('') // 商品/商戶名稱文字篩選
   const [currentPage, setCurrentPage] = useState(1)
   const recordsPerPage = 5
 
@@ -72,6 +80,9 @@ function App() {
 
   const currentCategoryFilterOptions = getDynamicCategoryFilterOptions()
 
+  // 宣告 activeEmployees 確保全元件可正確取用
+  const activeEmployees = employees.filter(e => e.status === 'active')
+
   // 載入交易記錄
   const fetchRecords = async () => {
     const { data, error } = await supabase
@@ -82,7 +93,7 @@ function App() {
     
     if (error) {
       console.error('讀取記錄失敗:', error.message)
-      return
+      return []
     }
     if (data) {
       setAllRecords(data)
@@ -90,19 +101,17 @@ function App() {
         return curr.type === 'income' ? acc + curr.amount : acc - curr.amount
       }, 0)
       setBalance(total)
+      return data
     }
+    return []
   }
 
   // 載入員工與預支明細
-  const fetchData = async () => {
+  const fetchData = async (currentRecords = allRecords) => {
     const { data: empData, error: empError } = await supabase
       .from('advances')
       .select('*')
       .order('employee_name', { ascending: true })
-
-    if (!empError && empData) {
-      setEmployees(empData)
-    }
 
     const { data: detData, error: detError } = await supabase
       .from('advance_transactions')
@@ -112,11 +121,43 @@ function App() {
     if (!detError && detData) {
       setAdvanceDetails(detData)
     }
+
+    if (!empError && empData) {
+      const calculatedEmployees = empData.map(emp => {
+        const empAdvances = (detData || []).filter(d => d.employee_id === emp.id)
+        const totalInitial = empAdvances.reduce((sum, d) => sum + Number(d.amount), 0)
+
+        const empDeductions = currentRecords.filter(r => r.type === 'expense' && r.is_reimbursed && r.reimburser === emp.employee_name)
+        const totalDeducted = empDeductions.reduce((sum, r) => sum + Number(r.amount), 0)
+
+        const finalBalance = Math.max(0, totalInitial - totalDeducted)
+
+        return {
+          ...emp,
+          initial_amount: totalInitial,
+          balance: finalBalance
+        }
+      })
+
+      setEmployees(calculatedEmployees)
+    }
+  }
+
+  // 手動更新數據按鈕觸發函數
+  const handleRefreshData = async () => {
+    setIsLoading(true)
+    const records = await fetchRecords()
+    await fetchData(records)
+    setIsLoading(false)
+    alert('🔄 數據已成功更新！')
   }
 
   useEffect(() => {
-    fetchRecords()
-    fetchData()
+    const initData = async () => {
+      const records = await fetchRecords()
+      await fetchData(records)
+    }
+    initData()
   }, [])
 
   // 新增員工
@@ -140,7 +181,7 @@ function App() {
     }
   }
 
-  // 切換員工狀態 (active / inactive)
+  // 切換員工狀態
   const handleToggleEmployeeStatus = async (emp) => {
     const nextStatus = emp.status === 'active' ? 'inactive' : 'active'
     const { error } = await supabase
@@ -155,7 +196,7 @@ function App() {
     }
   }
 
-  // 新增一筆預支資金明細
+  // 新增預支資金明細
   const handleAddAdvanceTransaction = async (e) => {
     e.preventDefault()
     if (!selectedEmpIdForAdvance || !advanceAmt) {
@@ -182,40 +223,66 @@ function App() {
       return
     }
 
-    const newInitial = emp.initial_amount + amt
-    const newBal = emp.balance + amt
-    const { error: updError } = await supabase
-      .from('advances')
-      .update({ initial_amount: newInitial, balance: newBal })
-      .eq('id', emp.id)
-
-    if (updError) {
-      alert('更新預支總額失敗：' + updError.message)
-    } else {
-      alert(`✅ 成功為 ${emp.employee_name} 記錄一筆預支資金 $${amt.toFixed(2)}`)
-      setAdvanceAmt('')
-      setAdvanceRemark('')
-      fetchData()
-    }
+    alert(`✅ 成功為 ${emp.employee_name} 記錄一筆預支資金 $${amt.toFixed(2)}`)
+    setAdvanceAmt('')
+    setAdvanceRemark('')
+    
+    const records = await fetchRecords()
+    await fetchData(records)
   }
 
   // 刪除預支明細
   const handleDeleteAdvanceTransaction = async (det) => {
-    if (!window.confirm('確定要刪除這筆預支記錄嗎？這會同步扣減該員工的預支總額與餘額！')) return
-
-    const emp = employees.find(e => e.id === det.employee_id)
-    if (emp) {
-      const newInitial = Math.max(0, emp.initial_amount - det.amount)
-      const newBal = Math.max(0, emp.balance - det.amount)
-
-      await supabase.from('advances').update({ initial_amount: newInitial, balance: newBal }).eq('id', emp.id)
-    }
+    if (!window.confirm('確定要刪除這筆預支記錄嗎？')) return
 
     const { error } = await supabase.from('advance_transactions').delete().eq('id', det.id)
     if (error) {
       alert('刪除失敗：' + error.message)
     } else {
-      fetchData()
+      const records = await fetchRecords()
+      await fetchData(records)
+    }
+  }
+
+  // 提交支付薪金
+  const handlePaySalary = async (e) => {
+    e.preventDefault()
+    if (!salaryEmployee || !salaryAmount) {
+      alert('請選擇員工並輸入薪金金額！')
+      return
+    }
+
+    const numAmt = parseFloat(salaryAmount)
+    setIsLoading(true)
+
+    try {
+      const { error } = await supabase
+        .from('transactions')
+        .insert([{
+          type: 'expense',
+          amount: numAmt,
+          category: '薪資',
+          item_name: `支付薪金 - ${salaryEmployee}`,
+          is_reimbursed: true,
+          reimburser: salaryEmployee,
+          reimbursement_method: salaryMethod,
+          remark: salaryRemark || `發放薪金給 ${salaryEmployee}`,
+          transaction_date: salaryDate
+        }])
+
+      if (error) throw error
+
+      alert(`✅ 成功向 ${salaryEmployee} 支付薪金 $${numAmt.toFixed(2)}！`)
+      setSalaryAmount('')
+      setSalaryRemark('')
+      
+      const records = await fetchRecords()
+      await fetchData(records)
+      setView('home')
+    } catch (err) {
+      alert('❌ 支付薪金失敗：' + err.message)
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -248,7 +315,6 @@ function App() {
 
     const numAmount = parseFloat(amount)
 
-    // 若為支出且已報銷，檢查是否有填寫報銷者（該報銷者即為對消預支資金的員工）
     if (type === 'expense' && isReimbursed && reimburser) {
       const emp = employees.find(e => e.employee_name === reimburser)
       if (emp) {
@@ -279,7 +345,6 @@ function App() {
         receiptUrl = publicURLData.publicUrl
       }
 
-      // 1. 寫入交易記錄
       const { error: insertError } = await supabase
         .from('transactions')
         .insert([{ 
@@ -288,11 +353,9 @@ function App() {
           category,
           item_name: itemName,
           is_reimbursed: isReimbursed,
-          account_method: type === 'income' ? accountMethod : null,
-          reimburser: type === 'expense' ? reimburser : null,
-          reimbursement_method: type === 'expense' ? reimbursementMethod : null,
-          advance_deduction_employee: (type === 'expense' && isReimbursed && reimburser) ? reimburser : null,
-          advance_deduction_amount: (type === 'expense' && isReimbursed && reimburser) ? numAmount : 0,
+          account_method: (type === 'income' && isReimbursed) ? accountMethod : null,
+          reimburser: (type === 'expense' && isReimbursed) ? reimburser : null,
+          reimbursement_method: (type === 'expense' && isReimbursed) ? reimbursementMethod : null,
           remark: remark,
           transaction_date: transactionDate,
           receipt_url: receiptUrl 
@@ -300,17 +363,8 @@ function App() {
 
       if (insertError) throw insertError
 
-      // 2. 若為支出且已報銷且有對應員工，自動扣減該員工的預支餘額
-      if (type === 'expense' && isReimbursed && reimburser) {
-        const emp = employees.find(e => e.employee_name === reimburser)
-        if (emp) {
-          const newBalance = emp.balance - numAmount
-          await supabase.from('advances').update({ balance: newBalance }).eq('id', emp.id)
-        }
-      }
-
-      await fetchRecords()
-      await fetchData()
+      const records = await fetchRecords()
+      await fetchData(records)
 
       alert('✅ 記錄新增成功！')
       resetForm()
@@ -325,21 +379,12 @@ function App() {
   const handleDelete = async (id) => {
     if (!window.confirm('確定要刪除這筆記錄嗎？')) return
 
-    const target = allRecords.find(r => r.id === id)
-    // 若該記錄原本有進行預支對消，刪除時需將金額退回給該員工的預支餘額
-    if (target && target.advance_deduction_employee && target.advance_deduction_amount > 0) {
-      const emp = employees.find(e => e.employee_name === target.advance_deduction_employee)
-      if (emp) {
-        const restoredBalance = emp.balance + target.advance_deduction_amount
-        await supabase.from('advances').update({ balance: restoredBalance }).eq('id', emp.id)
-      }
-    }
-
     const { error } = await supabase.from('transactions').delete().eq('id', id)
-    if (error) alert('刪除失敗：' + error.message)
-    else {
-      fetchRecords()
-      fetchData()
+    if (error) {
+      alert('刪除失敗：' + error.message)
+    } else {
+      const records = await fetchRecords()
+      await fetchData(records)
     }
   }
 
@@ -366,48 +411,19 @@ function App() {
     for (const id of selectedIds) {
       const target = allRecords.find(r => r.id === id)
       if (target && target.type === 'expense') {
-        const emp = employees.find(e => e.employee_name === target.reimburser)
-        if (emp) {
-          if (status && !target.is_reimbursed) {
-            // 從未報銷變為已報銷：扣除預支餘額
-            if (emp.balance >= target.amount) {
-              await supabase.from('advances').update({ balance: emp.balance - target.amount }).eq('id', emp.id)
-              await supabase.from('transactions').update({ is_reimbursed: true, advance_deduction_employee: emp.employee_name, advance_deduction_amount: target.amount }).eq('id', target.id)
-            } else {
-              alert(`⚠️ 員工 ${emp.employee_name} 預支餘額不足，無法批次完成此筆對消！`)
-              continue
-            }
-          } else if (!status && target.is_reimbursed && target.advance_deduction_amount > 0) {
-            // 從已報銷變為未報銷：退回預支餘額
-            await supabase.from('advances').update({ balance: emp.balance + target.advance_deduction_amount }).eq('id', emp.id)
-            await supabase.from('transactions').update({ is_reimbursed: false, advance_deduction_employee: null, advance_deduction_amount: 0 }).eq('id', target.id)
-          }
-        } else {
-          await supabase.from('transactions').update({ is_reimbursed: status }).eq('id', target.id)
-        }
+        await supabase.from('transactions').update({ is_reimbursed: status }).eq('id', target.id)
       }
     }
 
     alert('✅ 批次狀態更新完成！')
     setSelectedIds([])
-    fetchRecords()
-    fetchData()
+    const records = await fetchRecords()
+    await fetchData(records)
   }
 
   const handleBatchDelete = async () => {
     if (selectedIds.length === 0) return
     if (!window.confirm(`⚠️ 確定要刪除選取的 ${selectedIds.length} 筆記錄嗎？`)) return
-
-    for (const id of selectedIds) {
-      const target = allRecords.find(r => r.id === id)
-      if (target && target.advance_deduction_employee && target.advance_deduction_amount > 0) {
-        const emp = employees.find(e => e.employee_name === target.advance_deduction_employee)
-        if (emp) {
-          const restoredBalance = emp.balance + target.advance_deduction_amount
-          await supabase.from('advances').update({ balance: restoredBalance }).eq('id', emp.id)
-        }
-      }
-    }
 
     const { error } = await supabase.from('transactions').delete().in('id', selectedIds)
     if (error) {
@@ -415,8 +431,8 @@ function App() {
     } else {
       alert('✅ 成功批次刪除！')
       setSelectedIds([])
-      fetchRecords()
-      fetchData()
+      const records = await fetchRecords()
+      await fetchData(records)
     }
   }
 
@@ -442,38 +458,23 @@ function App() {
       return
     }
 
-    const originalRecord = allRecords.find(r => r.id === id)
     const newAmount = parseFloat(inlineForm.amount)
 
     setIsLoading(true)
     try {
-      // 1. 若原本有預支對消，先退回
-      if (originalRecord.advance_deduction_employee) {
-        const oldEmp = employees.find(e => e.employee_name === originalRecord.advance_deduction_employee)
-        if (oldEmp) {
-          await supabase.from('advances').update({ balance: oldEmp.balance + originalRecord.advance_deduction_amount }).eq('id', oldEmp.id)
-        }
-      }
-
-      let finalDeductionEmp = null
-      let finalDeductionAmt = 0
-
-      // 2. 若修改後為支出、已報銷且填了報銷者，進行預支對消扣款
       if (inlineForm.type === 'expense' && inlineForm.is_reimbursed && inlineForm.reimburser) {
         const newEmp = employees.find(e => e.employee_name === inlineForm.reimburser)
         if (newEmp) {
-          const { data: freshEmpData } = await supabase.from('advances').select('*').eq('id', newEmp.id).single()
-          
-          if (freshEmpData.balance < newAmount) {
-            alert(`⚠️ 該員工預支餘額不足！目前餘額：$${freshEmpData.balance.toFixed(2)}`)
+          const otherDeductions = allRecords
+            .filter(r => r.id !== id && r.type === 'expense' && r.is_reimbursed && r.reimburser === newEmp.employee_name)
+            .reduce((sum, r) => sum + Number(r.amount), 0)
+          const availableBalance = newEmp.initial_amount - otherDeductions
+
+          if (availableBalance < newAmount) {
+            alert(`⚠️ 該員工 (${newEmp.employee_name}) 預支餘額不足！可用餘額：$${availableBalance.toFixed(2)}`)
             setIsLoading(false)
             return
           }
-
-          finalDeductionEmp = inlineForm.reimburser
-          finalDeductionAmt = newAmount
-
-          await supabase.from('advances').update({ balance: freshEmpData.balance - newAmount }).eq('id', freshEmpData.id)
         }
       }
 
@@ -485,11 +486,9 @@ function App() {
           item_name: inlineForm.item_name,
           type: inlineForm.type,
           is_reimbursed: inlineForm.is_reimbursed,
-          account_method: inlineForm.type === 'income' ? inlineForm.account_method : null,
-          reimburser: inlineForm.type === 'expense' ? inlineForm.reimburser : null,
-          reimbursement_method: inlineForm.type === 'expense' ? inlineForm.reimbursement_method : null,
-          advance_deduction_employee: finalDeductionEmp,
-          advance_deduction_amount: finalDeductionAmt,
+          account_method: (inlineForm.type === 'income' && inlineForm.is_reimbursed) ? inlineForm.account_method : null,
+          reimburser: (inlineForm.type === 'expense' && inlineForm.is_reimbursed) ? inlineForm.reimburser : null,
+          reimbursement_method: (inlineForm.type === 'expense' && inlineForm.is_reimbursed) ? inlineForm.reimbursement_method : null,
           remark: inlineForm.remark,
           transaction_date: inlineForm.transaction_date
         })
@@ -499,8 +498,8 @@ function App() {
 
       alert('✅ 記錄更新成功！')
       setInlineEditingId(null)
-      fetchRecords()
-      fetchData()
+      const records = await fetchRecords()
+      await fetchData(records)
     } catch (error) {
       alert('❌ 更新失敗：' + error.message)
     } finally {
@@ -558,7 +557,9 @@ function App() {
       matchStatus = !record.is_reimbursed
     }
 
-    return matchCategory && matchType && matchStatus
+    const matchSearch = !searchText || (record.item_name && record.item_name.toLowerCase().includes(searchText.toLowerCase())) || (record.remark && record.remark.toLowerCase().includes(searchText.toLowerCase()))
+
+    return matchCategory && matchType && matchStatus && matchSearch
   })
 
   const indexOfLastRecord = currentPage * recordsPerPage
@@ -580,31 +581,133 @@ function App() {
 
       <div className="w-full max-w-lg bg-white rounded-xl shadow-md overflow-hidden p-6">
         
-        {/* 頂部導覽切換按鈕 */}
-        <div className="flex justify-between items-center mb-6 border-b pb-3">
-          <div className="flex gap-2">
+        {/* 頂部導覽切換與 Refresh 按鈕 */}
+        <div className="flex flex-col gap-3 mb-6 border-b pb-3">
+          <div className="flex justify-between items-center gap-1 flex-wrap">
+            <div className="flex gap-1.5">
+              <button 
+                onClick={() => setView('home')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'home' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                記賬主畫面
+              </button>
+              <button 
+                onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+              >
+                全部歷史
+              </button>
+            </div>
+            <div className="flex gap-1.5">
+              <button 
+                onClick={() => setView('salary')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'salary' ? 'bg-amber-600 text-white' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}
+              >
+                💰 支付薪金
+              </button>
+              <button 
+                onClick={() => setView('advances')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'advances' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}
+              >
+                👥 預支管理
+              </button>
+            </div>
+          </div>
+
+          <div className="flex justify-end">
             <button 
-              onClick={() => setView('home')}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${view === 'home' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
+              onClick={handleRefreshData}
+              disabled={isLoading}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white text-xs px-3 py-1.5 rounded-lg font-semibold shadow transition-colors flex items-center gap-1 disabled:opacity-50"
             >
-              記賬主畫面
-            </button>
-            <button 
-              onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
-              className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${view === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-            >
-              全部歷史記錄
+              {isLoading ? '更新中...' : '🔄 更新數據 (Refresh)'}
             </button>
           </div>
-          <button 
-            onClick={() => setView('advances')}
-            className={`px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors ${view === 'advances' ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-700 hover:bg-indigo-100'}`}
-          >
-            👥 員工預支管理
-          </button>
         </div>
 
-        {view === 'advances' ? (
+        {view === 'salary' ? (
+          // ================= 支付薪金版面 =================
+          <>
+            <div className="flex justify-between items-center mb-4">
+              <h1 className="text-xl font-bold text-gray-800">支付薪金管理</h1>
+              <button 
+                onClick={() => setView('home')}
+                className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200"
+              >
+                ← 返回主畫面
+              </button>
+            </div>
+
+            <form onSubmit={handlePaySalary} className="bg-amber-50 p-4 rounded-lg border border-amber-200 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">選擇員工 <span className="text-red-500">*</span></label>
+                <select 
+                  value={salaryEmployee}
+                  onChange={(e) => setSalaryEmployee(e.target.value)}
+                  className="w-full border rounded p-2 text-sm bg-white outline-none"
+                >
+                  <option value="">請選擇員工</option>
+                  {activeEmployees.map(emp => (
+                    <option key={emp.id} value={emp.employee_name}>{emp.employee_name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">薪金金額 (HKD) <span className="text-red-500">*</span></label>
+                <input 
+                  type="number" 
+                  value={salaryAmount}
+                  onChange={(e) => setSalaryAmount(e.target.value)}
+                  className="w-full border rounded p-2 text-sm outline-none bg-white"
+                  placeholder="0.00"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">發放方式</label>
+                <select 
+                  value={salaryMethod}
+                  onChange={(e) => setSalaryMethod(e.target.value)}
+                  className="w-full border rounded p-2 text-sm bg-white outline-none text-gray-700"
+                >
+                  {accountMethodOptions.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">發放日期</label>
+                <input 
+                  type="date" 
+                  value={salaryDate}
+                  onChange={(e) => setSalaryDate(e.target.value)}
+                  className="w-full border rounded p-2 text-sm outline-none bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">備註</label>
+                <input 
+                  type="text" 
+                  value={salaryRemark}
+                  onChange={(e) => setSalaryRemark(e.target.value)}
+                  className="w-full border rounded p-2 text-sm outline-none bg-white"
+                  placeholder="例如：本月薪金發放（選填）"
+                />
+              </div>
+
+              <button 
+                type="submit"
+                disabled={isLoading}
+                className="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm py-3 rounded-lg font-bold shadow"
+              >
+                {isLoading ? '處理中...' : '確認支付並記錄薪金'}
+              </button>
+            </form>
+          </>
+        ) : view === 'advances' ? (
           // ================= 員工預支資金管理面板 =================
           <>
             <div className="flex justify-between items-center mb-4">
@@ -617,7 +720,6 @@ function App() {
               </button>
             </div>
 
-            {/* 1. 新增員工 */}
             <form onSubmit={handleAddEmployee} className="bg-gray-50 p-3 rounded-lg border mb-4 space-y-2">
               <h2 className="text-xs font-bold text-gray-800">新增員工檔案</h2>
               <div className="flex gap-2">
@@ -634,7 +736,6 @@ function App() {
               </div>
             </form>
 
-            {/* 2. 記錄預支資金 */}
             <form onSubmit={handleAddAdvanceTransaction} className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 mb-6 space-y-2.5">
               <h2 className="text-xs font-bold text-indigo-900">新增預支資金記錄</h2>
               <div className="grid grid-cols-2 gap-2">
@@ -703,7 +804,6 @@ function App() {
               </button>
             </form>
 
-            {/* 員工狀態與預支餘額總覽 */}
             <h2 className="text-sm font-bold text-gray-800 mb-2">員工狀態與預支餘額</h2>
             <div className="space-y-2 mb-6">
               {employees.length === 0 ? (
@@ -731,7 +831,6 @@ function App() {
               )}
             </div>
 
-            {/* 預支資金歷史明細記錄 */}
             <h2 className="text-sm font-bold text-gray-800 mb-2">預支資金歷史明細記錄</h2>
             <div className="space-y-2">
               {advanceDetails.length === 0 ? (
@@ -831,6 +930,17 @@ function App() {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">上傳收據 / 發票相片</label>
+                <input 
+                  type="file" 
+                  ref={fileInputRef}
+                  accept="image/*"
+                  onChange={(e) => setFile(e.target.files[0])}
+                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                />
+              </div>
+
               {type === 'income' ? (
                 <div className="space-y-3 bg-green-50 p-3 rounded-lg border border-green-200">
                   <div className="flex items-center gap-2">
@@ -845,29 +955,34 @@ function App() {
                       此筆交易已入賬
                     </label>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">入賬方式</label>
-                    <select 
-                      value={accountMethod}
-                      onChange={(e) => setAccountMethod(e.target.value)}
-                      className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-green-500 text-gray-700"
-                    >
-                      <option value="">請選擇入賬方式</option>
-                      {accountMethodOptions.map((method) => (
-                        <option key={method} value={method}>{method}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">備註</label>
-                    <input 
-                      type="text" 
-                      value={remark}
-                      onChange={(e) => setRemark(e.target.value)}
-                      className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-green-500"
-                      placeholder="填寫其他備註事項（選填）"
-                    />
-                  </div>
+
+                  {isReimbursed && (
+                    <div className="space-y-3 pt-2 border-t border-green-200">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">入賬方式</label>
+                        <select 
+                          value={accountMethod}
+                          onChange={(e) => setAccountMethod(e.target.value)}
+                          className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-green-500 text-gray-700"
+                        >
+                          <option value="">請選擇入賬方式</option>
+                          {accountMethodOptions.map((method) => (
+                            <option key={method} value={method}>{method}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">備註</label>
+                        <input 
+                          type="text" 
+                          value={remark}
+                          onChange={(e) => setRemark(e.target.value)}
+                          className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-green-500"
+                          placeholder="填寫其他備註事項（選填）"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="space-y-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
@@ -884,59 +999,52 @@ function App() {
                     </label>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">報銷者（預支對消員工）</label>
-                    <select 
-                      value={reimburser}
-                      onChange={(e) => setReimburser(e.target.value)}
-                      className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700"
-                    >
-                      <option value="">請選擇報銷者</option>
-                      {employees.map(emp => (
-                        <option key={emp.id} value={emp.employee_name}>
-                          {emp.employee_name} {emp.status === 'active' ? `(預支餘額: $${emp.balance.toFixed(2)})` : '(已停用)'}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                  {isReimbursed && (
+                    <div className="space-y-3 pt-2 border-t border-gray-200">
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">報銷者（預支對消員工） <span className="text-red-500">*</span></label>
+                        <select 
+                          value={reimburser}
+                          onChange={(e) => setReimburser(e.target.value)}
+                          className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700"
+                        >
+                          <option value="">請選擇報銷者</option>
+                          {employees.map(emp => (
+                            <option key={emp.id} value={emp.employee_name}>
+                              {emp.employee_name} {emp.status === 'active' ? `(預支餘額: $${emp.balance.toFixed(2)})` : '(已停用)'}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">報銷方式</label>
-                    <select 
-                      value={reimbursementMethod}
-                      onChange={(e) => setReimbursementMethod(e.target.value)}
-                      className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700"
-                    >
-                      <option value="">請選擇報銷方式</option>
-                      {accountMethodOptions.map((method) => (
-                        <option key={method} value={method}>{method}</option>
-                      ))}
-                    </select>
-                  </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">報銷方式</label>
+                        <select 
+                          value={reimbursementMethod}
+                          onChange={(e) => setReimbursementMethod(e.target.value)}
+                          className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-blue-500 text-gray-700"
+                        >
+                          <option value="">請選擇報銷方式</option>
+                          {accountMethodOptions.map((method) => (
+                            <option key={method} value={method}>{method}</option>
+                          ))}
+                        </select>
+                      </div>
 
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">備註</label>
-                    <input 
-                      type="text" 
-                      value={remark}
-                      onChange={(e) => setRemark(e.target.value)}
-                      className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-blue-500"
-                      placeholder="填寫其他備註事項（選填）"
-                    />
-                  </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">備註</label>
+                        <input 
+                          type="text" 
+                          value={remark}
+                          onChange={(e) => setRemark(e.target.value)}
+                          className="w-full border border-gray-300 rounded p-2 text-sm bg-white outline-none focus:border-blue-500"
+                          placeholder="填寫其他備註事項（選填）"
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">上傳收據 / 發票相片</label>
-                <input 
-                  type="file" 
-                  ref={fileInputRef}
-                  accept="image/*"
-                  onChange={(e) => setFile(e.target.files[0])}
-                  className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
-                />
-              </div>
 
               <button 
                 onClick={handleSubmit}
@@ -952,7 +1060,7 @@ function App() {
                 <h2 className="text-lg font-bold text-gray-800">最新記錄 (最近5筆)</h2>
                 {allRecords.length > 5 && (
                   <button 
-                    onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+                    onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
                     className="text-sm text-blue-600 font-semibold hover:underline"
                   >
                     查看全部歷史記錄 →
@@ -995,7 +1103,7 @@ function App() {
                           </div>
                           <div className="flex gap-2">
                             <button 
-                              onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
+                              onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
                               className="text-blue-500 hover:text-blue-700 text-xs font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
                             >
                               修改
@@ -1029,9 +1137,25 @@ function App() {
               <div className="w-16"></div>
             </div>
 
-            {/* 篩選控制列 */}
+            {/* 篩選控制列 (加入商品/商戶名稱文字篩選) */}
             <div className="mb-4 space-y-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
               <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-gray-700">名稱關鍵字：</label>
+                <input 
+                  type="text"
+                  value={searchText}
+                  onChange={(e) => {
+                    setSearchText(e.target.value)
+                    setCurrentPage(1)
+                    setSelectedIds([])
+                    setInlineEditingId(null)
+                  }}
+                  className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none w-48 text-gray-700"
+                  placeholder="輸入商品/商戶名稱..."
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                 <label className="text-sm font-medium text-gray-700">收支篩選：</label>
                 <select
                   value={selectedTypeFilter}
