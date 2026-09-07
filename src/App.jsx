@@ -42,6 +42,8 @@ function App() {
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('all') 
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all') 
   const [searchText, setSearchText] = useState('') // 商品/商戶名稱文字篩選
+  const [startDate, setStartDate] = useState('') // 開始日期篩選
+  const [endDate, setEndDate] = useState('') // 結束日期篩選
   const [currentPage, setCurrentPage] = useState(1)
   const recordsPerPage = 5
 
@@ -554,6 +556,7 @@ function App() {
     }
   }
 
+  // 擴充過濾邏輯：加入開始與結束日期範圍篩選
   const filteredRecords = allRecords.filter(record => {
     const matchCategory = selectedCategoryFilter === 'all' || record.category === selectedCategoryFilter
     const matchType = selectedTypeFilter === 'all' || record.type === selectedTypeFilter
@@ -567,8 +570,27 @@ function App() {
 
     const matchSearch = !searchText || (record.item_name && record.item_name.toLowerCase().includes(searchText.toLowerCase())) || (record.remark && record.remark.toLowerCase().includes(searchText.toLowerCase()))
 
-    return matchCategory && matchType && matchStatus && matchSearch
+    let matchDate = true
+    if (startDate && record.transaction_date < startDate) {
+      matchDate = false
+    }
+    if (endDate && record.transaction_date > endDate) {
+      matchDate = false
+    }
+
+    return matchCategory && matchType && matchStatus && matchSearch && matchDate
   })
+
+  // 計算篩選後記錄的總收入、總支出與淨額
+  const filteredTotalIncome = filteredRecords
+    .filter(r => r.type === 'income')
+    .reduce((sum, r) => sum + Number(r.amount), 0)
+
+  const filteredTotalExpense = filteredRecords
+    .filter(r => r.type === 'expense')
+    .reduce((sum, r) => sum + Number(r.amount), 0)
+
+  const filteredNetBalance = filteredTotalIncome - filteredTotalExpense
 
   const indexOfLastRecord = currentPage * recordsPerPage
   const indexOfFirstRecord = indexOfLastRecord - recordsPerPage
@@ -601,7 +623,7 @@ function App() {
                 記賬主畫面
               </button>
               <button 
-                onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+                onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
               >
                 全部歷史
@@ -832,7 +854,6 @@ function App() {
                       <p className="text-[11px] text-gray-500 mt-0.5">累計預支：${emp.initial_amount.toFixed(2)} | 剩餘餘額：<strong className="text-indigo-600">${emp.balance.toFixed(2)}</strong></p>
                     </div>
 
-                    {/* 改進的按鈕群組：點擊即可直接執行離職、刪除或恢復正常 */}
                     <div className="flex gap-1">
                       {emp.status === 'active' ? (
                         <>
@@ -1092,7 +1113,7 @@ function App() {
                 <h2 className="text-lg font-bold text-gray-800">最新記錄 (最近5筆)</h2>
                 {allRecords.length > 5 && (
                   <button 
-                    onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+                    onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
                     className="text-sm text-blue-600 font-semibold hover:underline"
                   >
                     查看全部歷史記錄 →
@@ -1135,7 +1156,7 @@ function App() {
                           </div>
                           <div className="flex gap-2">
                             <button 
-                              onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
+                              onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
                               className="text-blue-500 hover:text-blue-700 text-xs font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
                             >
                               修改
@@ -1169,7 +1190,7 @@ function App() {
               <div className="w-16"></div>
             </div>
 
-            {/* 篩選控制列 (加入商品/商戶名稱文字篩選) */}
+            {/* 篩選控制列 (加入日期範圍與名稱關鍵字篩選) */}
             <div className="mb-4 space-y-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-gray-700">名稱關鍵字：</label>
@@ -1184,6 +1205,37 @@ function App() {
                   }}
                   className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none w-48 text-gray-700"
                   placeholder="輸入商品/商戶名稱..."
+                />
+              </div>
+
+              {/* 日期範圍篩選 */}
+              <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                <label className="text-sm font-medium text-gray-700">開始日期：</label>
+                <input 
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => {
+                    setStartDate(e.target.value)
+                    setCurrentPage(1)
+                    setSelectedIds([])
+                    setInlineEditingId(null)
+                  }}
+                  className="border border-gray-300 rounded-lg p-2 text-xs bg-white outline-none w-48 text-gray-700"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-gray-200">
+                <label className="text-sm font-medium text-gray-700">結束日期：</label>
+                <input 
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => {
+                    setEndDate(e.target.value)
+                    setCurrentPage(1)
+                    setSelectedIds([])
+                    setInlineEditingId(null)
+                  }}
+                  className="border border-gray-300 rounded-lg p-2 text-xs bg-white outline-none w-48 text-gray-700"
                 />
               </div>
 
@@ -1246,6 +1298,16 @@ function App() {
                     <option key={cat} value={cat}>{cat}</option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* 篩選結果加總統計資訊列 */}
+            <div className="mb-4 bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs space-y-1">
+              <div className="font-bold text-emerald-900 mb-1">📊 篩選結果加總統計（共 {filteredRecords.length} 筆記錄）：</div>
+              <div className="flex justify-between text-emerald-800">
+                <span>總收入：<strong className="text-green-600">+${filteredTotalIncome.toFixed(2)}</strong></span>
+                <span>總支出：<strong className="text-red-600">-${filteredTotalExpense.toFixed(2)}</strong></span>
+                <span>淨額：<strong className={filteredNetBalance >= 0 ? 'text-green-600' : 'text-red-600'}>${filteredNetBalance.toFixed(2)}</strong></span>
               </div>
             </div>
 
