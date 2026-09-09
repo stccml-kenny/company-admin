@@ -31,7 +31,13 @@ function App() {
   const [dueDate, setDueDate] = useState('')
   const [issuedBy, setIssuedBy] = useState('') 
   const [docRemark, setDocRemark] = useState('')
-  const [items, setItems] = useState([{ item_name: '', quantity: 1, unit_price: 0 }])
+  
+  // 新增：付款比例、支付方式與支付備註
+  const [paymentPercentage, setPaymentPercentage] = useState(100)
+  const [paymentMethod, setPaymentMethod] = useState('銀行轉賬')
+  const [paymentRemark, setPaymentRemark] = useState('')
+
+  const [items, setItems] = useState([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0 }])
   const [selectedPrintDoc, setSelectedPrintDoc] = useState(null)
   const [editingDocId, setEditingDocId] = useState(null)
 
@@ -40,14 +46,13 @@ function App() {
   const [editingItemOptionId, setEditingItemOptionId] = useState(null)
   const [editingItemOptionName, setEditingItemOptionName] = useState('')
 
-  // 客戶管理相關 State (支援新增、編輯、狀態與獨立 Email/Address)
   const [editingCustId, setEditingCustId] = useState(null)
   const [newCustName, setNewCustName] = useState('')
   const [newCustContact, setNewCustContact] = useState('')
   const [newCustEmail, setNewCustEmail] = useState('')
   const [newCustPhone, setNewCustPhone] = useState('')
   const [newCustAddress, setNewCustAddress] = useState('')
-  const [newCustStatus, setNewCustStatus] = useState('active') // 'active' (有效) 或 'inactive' (無效)
+  const [newCustStatus, setNewCustStatus] = useState('active')
 
   const [newEmpName, setNewEmpName] = useState('')
   const [selectedEmpIdForAdvance, setSelectedEmpIdForAdvance] = useState('')
@@ -650,7 +655,6 @@ function App() {
     }
   }
 
-  // 客戶的 新增、編輯、刪除與狀態更新
   const handleSaveCustomer = async (e) => {
     e.preventDefault()
     if (!newCustName.trim()) {
@@ -659,7 +663,6 @@ function App() {
     }
 
     if (editingCustId) {
-      // 編輯更新
       const { error } = await supabase.from('customers').update({
         name: newCustName,
         contact_person: newCustContact,
@@ -683,7 +686,6 @@ function App() {
         fetchData()
       }
     } else {
-      // 新增
       const { error } = await supabase.from('customers').insert([
         { 
           name: newCustName, 
@@ -731,14 +733,24 @@ function App() {
     }
   }
 
-  const addItemRow = () => setItems([...items, { item_name: '', quantity: 1, unit_price: 0 }])
+  const addItemRow = () => setItems([...items, { item_name: '', quantity: 1, sessions: 1, unit_price: 0 }])
   const updateItem = (index, field, value) => {
     const newItems = [...items]
     newItems[index][field] = value
     setItems(newItems)
   }
   const removeItem = (index) => setItems(items.filter((_, i) => i !== index))
-  const subtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unit_price)), 0)
+  
+  // 計算加總明細總額後，再乘以百分比（paymentPercentage / 100）
+  const rawSubtotal = items.reduce((sum, item) => {
+    const qty = Number(item.quantity) || 0
+    const sess = Number(item.sessions) || 1
+    const price = Number(item.unit_price) || 0
+    return sum + (qty * sess * price)
+  }, 0)
+
+  const percentageNum = Number(paymentPercentage) || 100
+  const finalTotalAmount = rawSubtotal * (percentageNum / 100)
 
   const handleSaveDocument = async (e) => {
     e.preventDefault()
@@ -754,8 +766,11 @@ function App() {
         issue_date: issueDate,
         due_date: docType === 'quotation' ? (dueDate || null) : null,
         issued_by: issuedBy,
-        subtotal: subtotal,
-        total_amount: subtotal,
+        subtotal: rawSubtotal,
+        total_amount: finalTotalAmount,
+        payment_percentage: percentageNum,
+        payment_method: paymentMethod,
+        payment_remark: paymentRemark,
         remark: docRemark
       }).eq('id', editingDocId)
 
@@ -766,13 +781,19 @@ function App() {
 
       await supabase.from('document_items').delete().eq('document_id', editingDocId)
 
-      const itemsToInsert = items.map(item => ({
-        document_id: editingDocId,
-        item_name: item.item_name,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        amount: Number(item.quantity) * Number(item.unit_price)
-      }))
+      const itemsToInsert = items.map(item => {
+        const qty = Number(item.quantity) || 1
+        const sess = Number(item.sessions) || 1
+        const price = Number(item.unit_price) || 0
+        return {
+          document_id: editingDocId,
+          item_name: item.item_name,
+          quantity: qty,
+          sessions: sess,
+          unit_price: price,
+          amount: qty * sess * price
+        }
+      })
 
       await supabase.from('document_items').insert(itemsToInsert)
 
@@ -791,8 +812,11 @@ function App() {
           issue_date: issueDate,
           due_date: docType === 'quotation' ? (dueDate || null) : null,
           issued_by: issuedBy,
-          subtotal: subtotal,
-          total_amount: subtotal,
+          subtotal: rawSubtotal,
+          total_amount: finalTotalAmount,
+          payment_percentage: percentageNum,
+          payment_method: paymentMethod,
+          payment_remark: paymentRemark,
           remark: docRemark,
           status: 'draft'
         }
@@ -804,13 +828,19 @@ function App() {
       }
 
       const docId = docResult.id
-      const itemsToInsert = items.map(item => ({
-        document_id: docId,
-        item_name: item.item_name,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        amount: Number(item.quantity) * Number(item.unit_price)
-      }))
+      const itemsToInsert = items.map(item => {
+        const qty = Number(item.quantity) || 1
+        const sess = Number(item.sessions) || 1
+        const price = Number(item.unit_price) || 0
+        return {
+          document_id: docId,
+          item_name: item.item_name,
+          quantity: qty,
+          sessions: sess,
+          unit_price: price,
+          amount: qty * sess * price
+        }
+      })
 
       const { error: itemError } = await supabase.from('document_items').insert(itemsToInsert)
       if (itemError) {
@@ -833,6 +863,9 @@ function App() {
     setDueDate(doc.due_date || '')
     setIssuedBy(doc.issued_by || '')
     setDocRemark(doc.remark || '')
+    setPaymentPercentage(doc.payment_percentage ?? 100)
+    setPaymentMethod(doc.payment_method || '銀行轉賬')
+    setPaymentRemark(doc.payment_remark || '')
 
     const { data: itemsData } = await supabase
       .from('document_items')
@@ -840,9 +873,14 @@ function App() {
       .eq('document_id', doc.id)
 
     if (itemsData && itemsData.length > 0) {
-      setItems(itemsData.map(i => ({ item_name: i.item_name, quantity: i.quantity, unit_price: i.unit_price })))
+      setItems(itemsData.map(i => ({ 
+        item_name: i.item_name, 
+        quantity: i.quantity || 1, 
+        sessions: i.sessions || 1, 
+        unit_price: i.unit_price 
+      })))
     } else {
-      setItems([{ item_name: '', quantity: 1, unit_price: 0 }])
+      setItems([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0 }])
     }
 
     setView('createDoc')
@@ -862,7 +900,7 @@ function App() {
   }
 
   const handleDeleteDocument = async (docId) => {
-    if (!window.confirm('⚠️ 確定要刪除這張單據嗎？此動作將同時刪除其品項明細且無法復原！')) return
+    if (!window.confirm('⚠️ 確定要刪除這張單據嗎？此動作將同時刪除其項目細明且無法復原！')) return
 
     const { error } = await supabase
       .from('documents')
@@ -922,6 +960,11 @@ function App() {
   // PDF 預覽模式
   if (view === 'printPreview' && selectedPrintDoc) {
     const cust = selectedPrintDoc.customerData || {}
+    const docData = selectedPrintDoc.documentData || {}
+    const pct = docData.payment_percentage ?? 100
+    const method = docData.payment_method || '銀行轉賬'
+    const pRemark = docData.payment_remark || ''
+
     return (
       <div className="min-h-screen bg-white p-8 font-sans max-w-3xl mx-auto">
         <style>{`
@@ -945,17 +988,17 @@ function App() {
           <div className="flex justify-between items-start border-b pb-4 mb-4">
             <div>
               <h2 className="text-2xl font-bold text-blue-600">
-                {selectedPrintDoc.documentData.type === 'quotation' ? '報價單 QUOTATION' : '發票 INVOICE'}
+                {docData.type === 'quotation' ? '報價單 QUOTATION' : '發票 INVOICE'}
               </h2>
-              <p className="text-xs text-gray-600 mt-1">單號：<span className="font-bold text-gray-800">{selectedPrintDoc.documentData.doc_number}</span></p>
+              <p className="text-xs text-gray-600 mt-1">單號：<span className="font-bold text-gray-800">{docData.doc_number}</span></p>
             </div>
             <div className="text-right text-xs text-gray-700 space-y-1">
-              <p>開立日期：{selectedPrintDoc.documentData.issue_date}</p>
-              {selectedPrintDoc.documentData.type === 'quotation' && selectedPrintDoc.documentData.due_date && (
-                <p>到期日：{selectedPrintDoc.documentData.due_date}</p>
+              <p>開立日期：{docData.issue_date}</p>
+              {docData.type === 'quotation' && docData.due_date && (
+                <p>到期日：{docData.due_date}</p>
               )}
-              {selectedPrintDoc.documentData.issued_by && (
-                <p className="font-semibold text-gray-900">發出人：{selectedPrintDoc.documentData.issued_by}</p>
+              {docData.issued_by && (
+                <p className="font-semibold text-gray-900">發出人：{docData.issued_by}</p>
               )}
             </div>
           </div>
@@ -973,33 +1016,50 @@ function App() {
               <tr className="bg-gray-800 text-white text-left">
                 <th className="p-2.5">項目說明</th>
                 <th className="p-2.5 text-center">數量</th>
+                <th className="p-2.5 text-center">節數</th>
                 <th className="p-2.5 text-right">單價</th>
                 <th className="p-2.5 text-right">小計</th>
               </tr>
             </thead>
             <tbody>
-              {selectedPrintDoc.items.map((item, idx) => (
-                <tr key={idx} className="border-b">
-                  <td className="p-2.5">{item.item_name}</td>
-                  <td className="p-2.5 text-center">{item.quantity}</td>
-                  <td className="p-2.5 text-right">${Number(item.unit_price).toFixed(2)}</td>
-                  <td className="p-2.5 text-right font-bold">${(Number(item.quantity) * Number(item.unit_price)).toFixed(2)}</td>
-                </tr>
-              ))}
+              {selectedPrintDoc.items.map((item, idx) => {
+                const qty = Number(item.quantity) || 1
+                const sess = Number(item.sessions) || 1
+                const price = Number(item.unit_price) || 0
+                const rowTotal = qty * sess * price
+                return (
+                  <tr key={idx} className="border-b">
+                    <td className="p-2.5">{item.item_name}</td>
+                    <td className="p-2.5 text-center">{qty}</td>
+                    <td className="p-2.5 text-center">{sess}</td>
+                    <td className="p-2.5 text-right">${price.toFixed(2)}</td>
+                    <td className="p-2.5 text-right font-bold">${rowTotal.toFixed(2)}</td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
 
+          {/* 總結與比例 */}
           <div className="flex justify-end mb-4">
-            <div className="bg-gray-100 p-3 rounded text-right w-52">
-              <p className="text-[10px] text-gray-500">總金額 (Total Amount)</p>
-              <p className="text-xl font-bold text-emerald-600">${Number(selectedPrintDoc.documentData.total_amount).toFixed(2)}</p>
+            <div className="bg-gray-100 p-3 rounded text-right w-64 space-y-1">
+              <p className="text-[11px] text-gray-600">項目總額：${Number(docData.subtotal || docData.total_amount).toFixed(2)}</p>
+              <p className="text-[11px] text-gray-600">支付比例：{pct}%</p>
+              <p className="text-[10px] text-gray-500 pt-1 border-t">應付總金額 (Total Amount)</p>
+              <p className="text-xl font-bold text-emerald-600">${Number(docData.total_amount).toFixed(2)}</p>
             </div>
           </div>
 
-          {selectedPrintDoc.documentData.remark && (
+          {/* 支付方式與備註 */}
+          <div className="bg-blue-50/50 border border-blue-100 p-3 rounded mb-4 text-xs space-y-1">
+            <p className="font-bold text-gray-700">支付方式：<span className="text-blue-600">{method}</span></p>
+            {pRemark && <p className="text-gray-600">支付備註：{pRemark}</p>}
+          </div>
+
+          {docData.remark && (
             <div className="border-t pt-3 text-xs text-gray-600 mb-8">
               <p className="font-bold mb-1">備註：</p>
-              <p>{selectedPrintDoc.documentData.remark}</p>
+              <p>{docData.remark}</p>
             </div>
           )}
 
@@ -1060,7 +1120,10 @@ function App() {
                   setSelectedCustomerId('')
                   setIssuedBy('')
                   setDocRemark('')
-                  setItems([{ item_name: '', quantity: 1, unit_price: 0 }])
+                  setPaymentPercentage(100)
+                  setPaymentMethod('銀行轉賬')
+                  setPaymentRemark('')
+                  setItems([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0 }])
                   setView('createDoc')
                 }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'createDoc' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
@@ -1416,7 +1479,7 @@ function App() {
             </div>
           </>
         ) : view === 'createDoc' ? (
-          // ================= 建立 / 編輯單據表單 =================
+          // ================= 建立 / 編輯單據表單（支援比例與支付方式） =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">{editingDocId ? '編輯單據' : '建立新單據'}</h1>
@@ -1479,10 +1542,11 @@ function App() {
                 <input type="text" value={issuedBy} onChange={(e) => setIssuedBy(e.target.value)} placeholder="例如：經理 / 財務部" className="w-full border rounded p-2 text-xs bg-white outline-none" />
               </div>
 
-              <h3 className="text-xs font-bold text-gray-800 pt-2 border-t">品項明細</h3>
+              <h3 className="text-xs font-bold text-gray-800 pt-2 border-t">項目細明</h3>
               {items.map((item, index) => (
-                <div key={index} className="flex gap-2 items-center mb-2">
-                  <div className="flex-1">
+                <div key={index} className="bg-white p-2.5 rounded border mb-2 space-y-2">
+                  <div>
+                    <label className="block text-[10px] text-gray-500 mb-0.5">項目說明</label>
                     <input 
                       list="common-items-list"
                       type="text" 
@@ -1496,16 +1560,79 @@ function App() {
                       {commonItemOptions.map(opt => <option key={opt.id} value={opt.name} />)}
                     </datalist>
                   </div>
-                  <input type="number" placeholder="數量" value={item.quantity} min="1" onChange={(e) => updateItem(index, 'quantity', e.target.value)} required className="w-16 border rounded p-1.5 text-xs bg-white outline-none" />
-                  <input type="number" placeholder="單價" value={item.unit_price} min="0" onChange={(e) => updateItem(index, 'unit_price', e.target.value)} required className="w-20 border rounded p-1.5 text-xs bg-white outline-none" />
-                  {items.length > 1 && <button type="button" onClick={() => removeItem(index)} className="text-red-500 text-xs font-bold px-1">刪除</button>}
+                  <div className="grid grid-cols-3 gap-2 items-center">
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-0.5">數量</label>
+                      <input type="number" placeholder="數量" value={item.quantity} min="1" onChange={(e) => updateItem(index, 'quantity', e.target.value)} required className="w-full border rounded p-1.5 text-xs bg-white outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-0.5">節數</label>
+                      <input type="number" placeholder="節數" value={item.sessions} min="1" onChange={(e) => updateItem(index, 'sessions', e.target.value)} required className="w-full border rounded p-1.5 text-xs bg-white outline-none" />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] text-gray-500 mb-0.5">單價</label>
+                      <input type="number" placeholder="單價" value={item.unit_price} min="0" onChange={(e) => updateItem(index, 'unit_price', e.target.value)} required className="w-full border rounded p-1.5 text-xs bg-white outline-none" />
+                    </div>
+                  </div>
+                  <div className="flex justify-between items-center pt-1 border-t text-xs">
+                    <span className="text-gray-500">小計: <strong className="text-blue-600">${((Number(item.quantity) || 1) * (Number(item.sessions) || 1) * (Number(item.unit_price) || 0)).toFixed(2)}</strong></span>
+                    {items.length > 1 && <button type="button" onClick={() => removeItem(index)} className="text-red-500 font-bold px-2 py-0.5 bg-red-50 rounded">刪除此項</button>}
+                  </div>
                 </div>
               ))}
-              <button type="button" onClick={addItemRow} className="bg-gray-200 text-gray-700 text-xs px-3 py-1 rounded font-semibold">+ 新增品項</button>
+              <button type="button" onClick={addItemRow} className="bg-gray-200 text-gray-700 text-xs px-3 py-1.5 rounded font-semibold">+ 新增項目細明</button>
 
-              <div className="text-right font-bold text-sm text-gray-800 pt-2">
-                總金額：<span className="text-emerald-600">${subtotal.toFixed(2)}</span>
+              {/* 支付比例設定 */}
+              <div className="grid grid-cols-2 gap-2 pt-2 border-t">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">支付比例 (%)</label>
+                  <input 
+                    type="number" 
+                    value={paymentPercentage} 
+                    min="1" 
+                    max="100" 
+                    onChange={(e) => setPaymentPercentage(e.target.value)} 
+                    className="w-full border rounded p-2 text-xs bg-white outline-none font-bold text-blue-600"
+                    placeholder="100"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">折算後總金額</label>
+                  <div className="p-2 text-sm font-bold text-emerald-600 bg-white border rounded">
+                    ${finalTotalAmount.toFixed(2)} <span className="text-[10px] text-gray-400 font-normal">(原價: ${rawSubtotal.toFixed(2)})</span>
+                  </div>
+                </div>
               </div>
+
+              {/* 支付方式選擇 */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">支付方式 (Payment Method)</label>
+                <select 
+                  value={paymentMethod} 
+                  onChange={(e) => setPaymentMethod(e.target.value)} 
+                  className="w-full border rounded p-2 text-xs bg-white outline-none"
+                >
+                  <option value="銀行轉賬">銀行轉賬 (Bank Transfer)</option>
+                  <option value="支票">支票 (Cheque)</option>
+                  <option value="現金">現金 (Cash)</option>
+                </select>
+              </div>
+
+              {/* 針對支票或銀行轉賬的備註 */}
+              {(paymentMethod === '支票' || paymentMethod === '銀行轉賬') && (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    {paymentMethod === '支票' ? '支票備註 (如：支票號碼/銀行)' : '銀行轉賬備註 (如：轉賬帳號/戶名)'}
+                  </label>
+                  <input 
+                    type="text" 
+                    value={paymentRemark} 
+                    onChange={(e) => setPaymentRemark(e.target.value)} 
+                    placeholder={paymentMethod === '支票' ? '請輸入支票號碼或相關資訊' : '請輸入轉賬帳號或相關資訊'} 
+                    className="w-full border rounded p-2 text-xs bg-white outline-none"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">備註</label>
@@ -1518,7 +1645,7 @@ function App() {
             </form>
           </>
         ) : view === 'customers' ? (
-          // ================= 客戶管理面板 (支援編輯、刪除與有效/無效狀態) =================
+          // ================= 客戶管理面板 =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">客戶管理</h1>
@@ -1526,7 +1653,6 @@ function App() {
                 ← 返回主畫面
               </button>
             </div>
-
             <form onSubmit={handleSaveCustomer} className="bg-gray-50 p-3 rounded-lg border mb-4 space-y-2">
               <h2 className="text-xs font-bold text-gray-800">{editingCustId ? '編輯客戶檔案' : '新增客戶檔案'}</h2>
               <div>
