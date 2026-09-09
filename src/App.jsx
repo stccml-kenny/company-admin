@@ -36,7 +36,6 @@ function App() {
   const [paymentMethod, setPaymentMethod] = useState('銀行轉賬')
   const [paymentRemark, setPaymentRemark] = useState('')
 
-  // 每一項改為記錄自訂輸入狀態 (customInput: true/false)
   const [items, setItems] = useState([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0, isCustom: false }])
   const [selectedPrintDoc, setSelectedPrintDoc] = useState(null)
   const [editingDocId, setEditingDocId] = useState(null)
@@ -67,7 +66,8 @@ function App() {
   const [salaryDate, setSalaryDate] = useState(new Date().toISOString().split('T')[0])
   const [salaryRemark, setSalaryRemark] = useState('')
 
-  const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all')
+  // 類別多選篩選 Array State
+  const [selectedCategories, setSelectedCategories] = useState([])
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('all') 
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all') 
   const [searchText, setSearchText] = useState('') 
@@ -198,8 +198,14 @@ function App() {
         const empAdvances = (detData || []).filter(d => d.employee_id === emp.id)
         const totalInitial = empAdvances.reduce((sum, d) => sum + Number(d.amount), 0)
 
-        const empDeductions = currentRecords.filter(r => r.type === 'expense' && r.is_reimbursed && r.reimburser === emp.employee_name)
-        const totalDeducted = empDeductions.reduce((sum, r) => sum + Number(r.amount), 0)
+        const empNameTrimmed = emp.employee_name.trim().toLowerCase()
+        const empDeductions = currentRecords.filter(r => {
+          if (r.advance_deduction_employee) {
+            return r.advance_deduction_employee.trim().toLowerCase() === empNameTrimmed
+          }
+          return false
+        })
+        const totalDeducted = empDeductions.reduce((sum, r) => sum + Number(r.advance_deduction_amount || 0), 0)
 
         const finalBalance = Math.max(0, totalInitial - totalDeducted)
 
@@ -276,7 +282,7 @@ function App() {
 
     const { error } = await supabase
       .from('advances')
-      .insert([{ employee_name: newEmpName, initial_amount: 0, balance: 0, status: 'active' }])
+      .insert([{ employee_name: newEmpName.trim(), initial_amount: 0, balance: 0, status: 'active' }])
 
     if (error) {
       alert('新增員工失敗（可能已存在）：' + error.message)
@@ -424,16 +430,6 @@ function App() {
 
     const numAmount = parseFloat(amount)
 
-    if (type === 'expense' && isReimbursed && reimburser) {
-      const emp = employees.find(e => e.employee_name === reimburser)
-      if (emp) {
-        if (emp.balance < numAmount) {
-          alert(`⚠️ 該員工 (${reimburser}) 預支餘額不足！目前餘額：$${emp.balance.toFixed(2)}，本次報銷金額：$${numAmount.toFixed(2)}`)
-          return
-        }
-      }
-    }
-
     setIsLoading(true)
     
     try {
@@ -519,7 +515,7 @@ function App() {
 
     for (const id of selectedIds) {
       const target = allRecords.find(r => r.id === id)
-      if (target && target.type === 'expense') {
+      if (target) {
         await supabase.from('transactions').update({ is_reimbursed: status }).eq('id', target.id)
       }
     }
@@ -571,22 +567,6 @@ function App() {
 
     setIsLoading(true)
     try {
-      if (inlineForm.type === 'expense' && inlineForm.is_reimbursed && inlineForm.reimburser) {
-        const newEmp = employees.find(e => e.employee_name === inlineForm.reimburser)
-        if (newEmp) {
-          const otherDeductions = allRecords
-            .filter(r => r.id !== id && r.type === 'expense' && r.is_reimbursed && r.reimburser === newEmp.employee_name)
-            .reduce((sum, r) => sum + Number(r.amount), 0)
-          const availableBalance = newEmp.initial_amount - otherDeductions
-
-          if (availableBalance < newAmount) {
-            alert(`⚠️ 該員工 (${newEmp.employee_name}) 預支餘額不足！可用餘額：$${availableBalance.toFixed(2)}`)
-            setIsLoading(false)
-            return
-          }
-        }
-      }
-
       const { error } = await supabase
         .from('transactions')
         .update({
@@ -595,9 +575,9 @@ function App() {
           item_name: inlineForm.item_name,
           type: inlineForm.type,
           is_reimbursed: inlineForm.is_reimbursed,
-          account_method: (inlineForm.type === 'income' && inlineForm.is_reimbursed) ? inlineForm.account_method : null,
-          reimburser: (inlineForm.type === 'expense' && inlineForm.is_reimbursed) ? inlineForm.reimburser : null,
-          reimbursement_method: (inlineForm.type === 'expense' && inlineForm.is_reimbursed) ? inlineForm.reimbursement_method : null,
+          account_method: inlineForm.account_method || null,
+          reimburser: inlineForm.reimburser || null,
+          reimbursement_method: inlineForm.reimbursement_method || null,
           remark: inlineForm.remark,
           transaction_date: inlineForm.transaction_date
         })
@@ -889,7 +869,7 @@ function App() {
           unit_price: i.unit_price,
           isCustom: !existsInCommon && name !== ''
         }
-      })))
+      }))
     } else {
       setItems([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0, isCustom: false }])
     }
@@ -926,8 +906,9 @@ function App() {
     }
   }
 
+  // 類別多選篩選邏輯
   const filteredRecords = allRecords.filter(record => {
-    const matchCategory = selectedCategoryFilter === 'all' || record.category === selectedCategoryFilter
+    const matchCategory = selectedCategories.length === 0 || (record.category && selectedCategories.includes(record.category))
     const matchType = selectedTypeFilter === 'all' || record.type === selectedTypeFilter
     
     let matchStatus = true
@@ -968,7 +949,6 @@ function App() {
   const accountMethodOptions = ['轉賬匯款', '銀行轉賬', '支票', '現金']
   const activeEmployees = employees.filter(e => e.status === 'active')
 
-  // PDF 預覽模式
   if (view === 'printPreview' && selectedPrintDoc) {
     const cust = selectedPrintDoc.customerData || {}
     const docData = selectedPrintDoc.documentData || {}
@@ -1111,7 +1091,7 @@ function App() {
                 記賬主畫面
               </button>
               <button 
-                onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+                onClick={() => { setSelectedCategories([]); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
               >
                 全部歷史
@@ -1488,7 +1468,7 @@ function App() {
             </div>
           </>
         ) : view === 'createDoc' ? (
-          // ================= 建立 / 編輯單據表單（已改用真正的 <select> 下拉選單） =================
+          // ================= 建立 / 編輯單據表單 =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">{editingDocId ? '編輯單據' : '建立新單據'}</h1>
@@ -1967,7 +1947,7 @@ function App() {
                 <h2 className="text-lg font-bold text-gray-800">最新記錄 (最近5筆)</h2>
                 {allRecords.length > 5 && (
                   <button 
-                    onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+                    onClick={() => { setSelectedCategories([]); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
                     className="text-sm text-blue-600 font-semibold hover:underline"
                   >
                     查看全部歷史記錄 →
@@ -1996,7 +1976,7 @@ function App() {
                           </div>
                           <div className="flex gap-2">
                             <button 
-                              onClick={() => { setSelectedCategoryFilter('all'); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
+                              onClick={() => { setSelectedCategories([]); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); handleStartInlineEdit(record); }}
                               className="text-blue-500 hover:text-blue-700 text-xs font-medium px-2 py-1 rounded bg-blue-50 hover:bg-blue-100"
                             >
                               修改
@@ -2017,7 +1997,7 @@ function App() {
             </div>
           </>
         ) : (
-          // ================= 全部歷史記錄頁面 =================
+          // ================= 全部歷史記錄頁面（具備類別多選篩選與狀態標籤） =================
           <>
             <div className="flex justify-between items-center mb-6">
               <button 
@@ -2031,7 +2011,7 @@ function App() {
             </div>
 
             {/* 篩選控制列 */}
-            <div className="mb-4 space-y-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
+            <div className="mb-4 space-y-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-gray-700">名稱關鍵字：</label>
                 <input 
@@ -2084,7 +2064,7 @@ function App() {
                   value={selectedTypeFilter}
                   onChange={(e) => {
                     setSelectedTypeFilter(e.target.value)
-                    setSelectedCategoryFilter('all')
+                    setSelectedCategories([])
                     setSelectedStatusFilter('all')
                     setCurrentPage(1)
                     setSelectedIds([])
@@ -2120,23 +2100,42 @@ function App() {
                 </div>
               )}
 
-              <div className="flex items-center justify-between pt-2 border-t border-gray-200">
-                <label className="text-sm font-medium text-gray-700">類別篩選：</label>
-                <select
-                  value={selectedCategoryFilter}
-                  onChange={(e) => {
-                    setSelectedCategoryFilter(e.target.value)
-                    setCurrentPage(1)
-                    setSelectedIds([])
-                    setInlineEditingId(null)
-                  }}
-                  className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none w-48 text-gray-700"
-                >
-                  <option value="all">全部類別</option>
-                  {currentCategoryFilterOptions.map((cat) => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
-                </select>
+              {/* 類別多選篩選區塊 (Checkbox) */}
+              <div className="pt-2 border-t border-gray-200 space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <label className="text-sm font-medium text-gray-700">類別篩選 (可多選)：</label>
+                  {selectedCategories.length > 0 && (
+                    <button 
+                      onClick={() => setSelectedCategories([])} 
+                      className="text-[11px] text-blue-600 underline font-semibold"
+                    >
+                      清除全部類別
+                    </button>
+                  )}
+                </div>
+                <div className="flex flex-wrap gap-2 bg-white p-2 rounded border">
+                  {currentCategoryFilterOptions.map((cat) => {
+                    const isChecked = selectedCategories.includes(cat)
+                    return (
+                      <label key={cat} className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs cursor-pointer border transition-colors ${isChecked ? 'bg-blue-50 border-blue-300 text-blue-700 font-bold' : 'bg-gray-50 border-gray-200 text-gray-700'}`}>
+                        <input 
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedCategories([...selectedCategories, cat])
+                            } else {
+                              setSelectedCategories(selectedCategories.filter(c => c !== cat))
+                            }
+                            setCurrentPage(1)
+                          }}
+                          className="w-3.5 h-3.5 text-blue-600 rounded border-gray-300"
+                        />
+                        {cat}
+                      </label>
+                    )
+                  })}
+                </div>
               </div>
             </div>
 
@@ -2283,6 +2282,9 @@ function App() {
                                     <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
                                   )}
                                   <span className="font-medium text-gray-800 min-w-[5em]">{record.item_name || '未填寫品名'}</span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-semibold ${record.is_reimbursed ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
+                                    {record.type === 'income' ? (record.is_reimbursed ? '已入賬' : '未入賬') : (record.is_reimbursed ? '已報銷' : '未報銷')}
+                                  </span>
                                 </div>
                                 <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
                               </div>
