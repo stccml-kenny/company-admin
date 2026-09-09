@@ -32,12 +32,12 @@ function App() {
   const [issuedBy, setIssuedBy] = useState('') 
   const [docRemark, setDocRemark] = useState('')
   
-  // 新增：付款比例、支付方式與支付備註
   const [paymentPercentage, setPaymentPercentage] = useState(100)
   const [paymentMethod, setPaymentMethod] = useState('銀行轉賬')
   const [paymentRemark, setPaymentRemark] = useState('')
 
-  const [items, setItems] = useState([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0 }])
+  // 每一項改為記錄自訂輸入狀態 (customInput: true/false)
+  const [items, setItems] = useState([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0, isCustom: false }])
   const [selectedPrintDoc, setSelectedPrintDoc] = useState(null)
   const [editingDocId, setEditingDocId] = useState(null)
 
@@ -733,15 +733,21 @@ function App() {
     }
   }
 
-  const addItemRow = () => setItems([...items, { item_name: '', quantity: 1, sessions: 1, unit_price: 0 }])
+  const addItemRow = () => setItems([...items, { item_name: '', quantity: 1, sessions: 1, unit_price: 0, isCustom: false }])
+  
   const updateItem = (index, field, value) => {
     const newItems = [...items]
-    newItems[index][field] = value
+    if (field === 'item_name' && value === 'CUSTOM_INPUT') {
+      newItems[index].isCustom = true
+      newItems[index].item_name = ''
+    } else {
+      newItems[index][field] = value
+    }
     setItems(newItems)
   }
+
   const removeItem = (index) => setItems(items.filter((_, i) => i !== index))
   
-  // 計算加總明細總額後，再乘以百分比（paymentPercentage / 100）
   const rawSubtotal = items.reduce((sum, item) => {
     const qty = Number(item.quantity) || 0
     const sess = Number(item.sessions) || 1
@@ -873,14 +879,19 @@ function App() {
       .eq('document_id', doc.id)
 
     if (itemsData && itemsData.length > 0) {
-      setItems(itemsData.map(i => ({ 
-        item_name: i.item_name, 
-        quantity: i.quantity || 1, 
-        sessions: i.sessions || 1, 
-        unit_price: i.unit_price 
+      setItems(itemsData.map(i => {
+        const name = i.item_name || ''
+        const existsInCommon = commonItemOptions.some(opt => opt.name === name)
+        return { 
+          item_name: name, 
+          quantity: i.quantity || 1, 
+          sessions: i.sessions || 1, 
+          unit_price: i.unit_price,
+          isCustom: !existsInCommon && name !== ''
+        }
       })))
     } else {
-      setItems([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0 }])
+      setItems([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0, isCustom: false }])
     }
 
     setView('createDoc')
@@ -1040,7 +1051,6 @@ function App() {
             </tbody>
           </table>
 
-          {/* 總結與比例 */}
           <div className="flex justify-end mb-4">
             <div className="bg-gray-100 p-3 rounded text-right w-64 space-y-1">
               <p className="text-[11px] text-gray-600">項目總額：${Number(docData.subtotal || docData.total_amount).toFixed(2)}</p>
@@ -1050,7 +1060,6 @@ function App() {
             </div>
           </div>
 
-          {/* 支付方式與備註 */}
           <div className="bg-blue-50/50 border border-blue-100 p-3 rounded mb-4 text-xs space-y-1">
             <p className="font-bold text-gray-700">支付方式：<span className="text-blue-600">{method}</span></p>
             {pRemark && <p className="text-gray-600">支付備註：{pRemark}</p>}
@@ -1123,7 +1132,7 @@ function App() {
                   setPaymentPercentage(100)
                   setPaymentMethod('銀行轉賬')
                   setPaymentRemark('')
-                  setItems([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0 }])
+                  setItems([{ item_name: '', quantity: 1, sessions: 1, unit_price: 0, isCustom: false }])
                   setView('createDoc')
                 }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'createDoc' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
@@ -1479,7 +1488,7 @@ function App() {
             </div>
           </>
         ) : view === 'createDoc' ? (
-          // ================= 建立 / 編輯單據表單（支援比例與支付方式） =================
+          // ================= 建立 / 編輯單據表單（已改用真正的 <select> 下拉選單） =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">{editingDocId ? '編輯單據' : '建立新單據'}</h1>
@@ -1547,19 +1556,46 @@ function App() {
                 <div key={index} className="bg-white p-2.5 rounded border mb-2 space-y-2">
                   <div>
                     <label className="block text-[10px] text-gray-500 mb-0.5">項目說明</label>
-                    <input 
-                      list="common-items-list"
-                      type="text" 
-                      placeholder="項目說明（可下拉選取或手輸）" 
-                      value={item.item_name} 
-                      onChange={(e) => updateItem(index, 'item_name', e.target.value)} 
-                      required 
-                      className="w-full border rounded p-1.5 text-xs bg-white outline-none" 
-                    />
-                    <datalist id="common-items-list">
-                      {commonItemOptions.map(opt => <option key={opt.id} value={opt.name} />)}
-                    </datalist>
+                    {item.isCustom ? (
+                      <div className="flex gap-1">
+                        <input 
+                          type="text" 
+                          placeholder="請手動輸入項目說明" 
+                          value={item.item_name} 
+                          onChange={(e) => updateItem(index, 'item_name', e.target.value)} 
+                          required 
+                          className="flex-1 border rounded p-1.5 text-xs bg-white outline-none" 
+                        />
+                        <button 
+                          type="button" 
+                          onClick={() => updateItem(index, 'isCustom', false)} 
+                          className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 text-[10px] rounded font-semibold"
+                        >
+                          返回下拉
+                        </button>
+                      </div>
+                    ) : (
+                      <select 
+                        value={item.item_name}
+                        onChange={(e) => {
+                          if (e.target.value === 'CUSTOM_INPUT') {
+                            updateItem(index, 'item_name', 'CUSTOM_INPUT')
+                          } else {
+                            updateItem(index, 'item_name', e.target.value)
+                          }
+                        }}
+                        required
+                        className="w-full border rounded p-1.5 text-xs bg-white outline-none"
+                      >
+                        <option value="">-- 請選擇項目說明 --</option>
+                        {commonItemOptions.map(opt => (
+                          <option key={opt.id} value={opt.name}>{opt.name}</option>
+                        ))}
+                        <option value="CUSTOM_INPUT">✏️ 手動輸入其他項目...</option>
+                      </select>
+                    )}
                   </div>
+
                   <div className="grid grid-cols-3 gap-2 items-center">
                     <div>
                       <label className="block text-[10px] text-gray-500 mb-0.5">數量</label>
@@ -1582,7 +1618,6 @@ function App() {
               ))}
               <button type="button" onClick={addItemRow} className="bg-gray-200 text-gray-700 text-xs px-3 py-1.5 rounded font-semibold">+ 新增項目細明</button>
 
-              {/* 支付比例設定 */}
               <div className="grid grid-cols-2 gap-2 pt-2 border-t">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">支付比例 (%)</label>
@@ -1604,7 +1639,6 @@ function App() {
                 </div>
               </div>
 
-              {/* 支付方式選擇 */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">支付方式 (Payment Method)</label>
                 <select 
@@ -1618,7 +1652,6 @@ function App() {
                 </select>
               </div>
 
-              {/* 針對支票或銀行轉賬的備註 */}
               {(paymentMethod === '支票' || paymentMethod === '銀行轉賬') && (
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
