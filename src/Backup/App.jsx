@@ -2,53 +2,27 @@ import { useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 
 function App() {
-  const [view, setView] = useState('home') 
-
+  // 新增記錄用的主畫面狀態
   const [type, setType] = useState('expense')
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('')
   const [itemName, setItemName] = useState('')
   const [transactionDate, setTransactionDate] = useState(new Date().toISOString().split('T')[0])
   const [isReimbursed, setIsReimbursed] = useState(false)
-  const [accountMethod, setAccountMethod] = useState('') 
-  const [reimburser, setReimburser] = useState('') 
-  const [reimbursementMethod, setReimbursementMethod] = useState('') 
-  const [remark, setRemark] = useState('') 
+  const [accountMethod, setAccountMethod] = useState('') // 入賬方式 (收入專用)
+  const [reimburser, setReimburser] = useState('') // 報銷者 (支出專用)
+  const [reimbursementMethod, setReimbursementMethod] = useState('') // 報銷方式 (支出專用)
+  const [remark, setRemark] = useState('') // 備註
   const [file, setFile] = useState(null)
   const [isLoading, setIsLoading] = useState(false)
   
   const [allRecords, setAllRecords] = useState([])
-  const [employees, setEmployees] = useState([]) 
-  const [advanceDetails, setAdvanceDetails] = useState([]) 
+  const [employees, setEmployees] = useState([]) // 員工預支列表
+  const [advanceDetails, setAdvanceDetails] = useState([]) // 所有預支明細記錄
   const [balance, setBalance] = useState(0)
-
-  const [documents, setDocuments] = useState([])
-  const [customers, setCustomers] = useState([])
-  const [docType, setDocType] = useState('quotation')
-  const [docNumber, setDocNumber] = useState('')
-  const [selectedCustomerId, setSelectedCustomerId] = useState('')
-  const [issueDate, setIssueDate] = useState(new Date().toISOString().split('T')[0])
-  const [dueDate, setDueDate] = useState('')
-  const [issuedBy, setIssuedBy] = useState('') 
-  const [docRemark, setDocRemark] = useState('')
-  const [items, setItems] = useState([{ item_name: '', quantity: 1, unit_price: 0 }])
-  const [selectedPrintDoc, setSelectedPrintDoc] = useState(null)
-  const [editingDocId, setEditingDocId] = useState(null)
-
-  const [commonItemOptions, setCommonItemOptions] = useState([])
-  const [newItemOptionName, setNewItemOptionName] = useState('')
-  const [editingItemOptionId, setEditingItemOptionId] = useState(null)
-  const [editingItemOptionName, setEditingItemOptionName] = useState('')
-
-  // 客戶管理相關 State (支援新增、編輯、狀態與獨立 Email/Address)
-  const [editingCustId, setEditingCustId] = useState(null)
-  const [newCustName, setNewCustName] = useState('')
-  const [newCustContact, setNewCustContact] = useState('')
-  const [newCustEmail, setNewCustEmail] = useState('')
-  const [newCustPhone, setNewCustPhone] = useState('')
-  const [newCustAddress, setNewCustAddress] = useState('')
-  const [newCustStatus, setNewCustStatus] = useState('active') // 'active' (有效) 或 'inactive' (無效)
-
+  const [view, setView] = useState('home') // 'home' | 'all' | 'advances' | 'salary'
+  
+  // 員工預支管理頁面的互動狀態
   const [newEmpName, setNewEmpName] = useState('')
   const [selectedEmpIdForAdvance, setSelectedEmpIdForAdvance] = useState('')
   const [advanceDate, setAdvanceDate] = useState(new Date().toISOString().split('T')[0])
@@ -56,23 +30,27 @@ function App() {
   const [advanceMethod, setAdvanceMethod] = useState('銀行轉賬')
   const [advanceRemark, setAdvanceRemark] = useState('')
 
+  // 薪金支付版面的互動狀態
   const [salaryEmployee, setSalaryEmployee] = useState('')
   const [salaryAmount, setSalaryAmount] = useState('')
   const [salaryMethod, setSalaryMethod] = useState('')
   const [salaryDate, setSalaryDate] = useState(new Date().toISOString().split('T')[0])
   const [salaryRemark, setSalaryRemark] = useState('')
 
+  // 篩選與分頁狀態
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState('all')
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('all') 
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all') 
-  const [searchText, setSearchText] = useState('') 
-  const [startDate, setStartDate] = useState('') 
-  const [endDate, setEndDate] = useState('') 
+  const [searchText, setSearchText] = useState('') // 商品/商戶名稱文字篩選
+  const [startDate, setStartDate] = useState('') // 開始日期篩選
+  const [endDate, setEndDate] = useState('') // 結束日期篩選
   const [currentPage, setCurrentPage] = useState(1)
   const recordsPerPage = 5
 
+  // 批次選取狀態
   const [selectedIds, setSelectedIds] = useState([])
 
+  // 獨立行內編輯狀態
   const [inlineEditingId, setInlineEditingId] = useState(null)
   const [inlineForm, setInlineForm] = useState({
     amount: '',
@@ -87,10 +65,12 @@ function App() {
     transaction_date: ''
   })
 
+  // 檔案上傳參照
   const fileInputRef = useRef(null)
   const historyFileInputRef = useRef(null)
   const [uploadingRecordId, setUploadingRecordId] = useState(null)
 
+  // 類別清單
   const incomeCategories = ['導師費', '材料費', '拍攝費用']
   const expenseCategories = ['交通', '飲食', '雜項', '娛樂', '投資', '薪資', '其他']
 
@@ -102,28 +82,7 @@ function App() {
 
   const currentCategoryFilterOptions = getDynamicCategoryFilterOptions()
 
-  const generateDocNumber = async (typeVal, dateVal, existingDocs = documents) => {
-    const prefix = typeVal === 'quotation' ? 'QT' : 'INV'
-    const dateStr = dateVal.replace(/-/g, '') 
-    const pattern = `${prefix}-${dateStr}-`
-
-    const sameDayDocs = existingDocs.filter(d => d.doc_number && d.doc_number.startsWith(pattern))
-    const nextSeq = sameDayDocs.length + 1
-    const seqStr = String(nextSeq).padStart(3, '0')
-
-    return `${prefix}-${dateStr}-${seqStr}`
-  }
-
-  useEffect(() => {
-    const updateNum = async () => {
-      if (!editingDocId) {
-        const num = await generateDocNumber(docType, issueDate, documents)
-        setDocNumber(num)
-      }
-    }
-    updateNum()
-  }, [docType, issueDate, documents, editingDocId])
-
+  // 載入交易記錄
   const fetchRecords = async () => {
     const { data, error } = await supabase
       .from('transactions')
@@ -146,19 +105,7 @@ function App() {
     return []
   }
 
-  const fetchItemOptions = async () => {
-    const { data, error } = await supabase
-      .from('item_options')
-      .select('*')
-      .order('created_at', { ascending: true })
-    
-    if (error) {
-      console.error('讀取項目說明失敗:', error.message)
-    } else if (data) {
-      setCommonItemOptions(data)
-    }
-  }
-
+  // 載入員工與預支明細
   const fetchData = async (currentRecords = allRecords) => {
     const { data: empData, error: empError } = await supabase
       .from('advances')
@@ -169,20 +116,6 @@ function App() {
       .from('advance_transactions')
       .select('*')
       .order('date', { ascending: false })
-
-    const { data: custData } = await supabase
-      .from('customers')
-      .select('*')
-      .order('created_at', { ascending: false })
-    if (custData) setCustomers(custData)
-
-    const { data: docData } = await supabase
-      .from('documents')
-      .select('*, customers(*)')
-      .order('created_at', { ascending: false })
-    if (docData) setDocuments(docData)
-
-    await fetchItemOptions()
 
     if (!detError && detData) {
       setAdvanceDetails(detData)
@@ -209,6 +142,7 @@ function App() {
     }
   }
 
+  // 更新數據按鈕：不僅更新數據，也讓頁面重新整理 (Refresh)
   const handleRefreshData = async () => {
     setIsLoading(true)
     const records = await fetchRecords()
@@ -225,43 +159,7 @@ function App() {
     initData()
   }, [])
 
-  const handleAddItemOption = async (e) => {
-    e.preventDefault()
-    if (!newItemOptionName.trim()) return
-
-    const { error } = await supabase.from('item_options').insert([{ name: newItemOptionName.trim() }])
-    if (error) {
-      alert('新增項目失敗: ' + error.message)
-    } else {
-      setNewItemOptionName('')
-      fetchItemOptions()
-    }
-  }
-
-  const handleUpdateItemOption = async (id) => {
-    if (!editingItemOptionName.trim()) return
-
-    const { error } = await supabase.from('item_options').update({ name: editingItemOptionName.trim() }).eq('id', id)
-    if (error) {
-      alert('更新項目失敗: ' + error.message)
-    } else {
-      setEditingItemOptionId(null)
-      setEditingItemOptionName('')
-      fetchItemOptions()
-    }
-  }
-
-  const handleDeleteItemOption = async (id) => {
-    if (!window.confirm('確定要刪除這個常用項目嗎？')) return
-
-    const { error } = await supabase.from('item_options').delete().eq('id', id)
-    if (error) {
-      alert('刪除失敗: ' + error.message)
-    } else {
-      fetchItemOptions()
-    }
-  }
-
+  // 新增員工
   const handleAddEmployee = async (e) => {
     e.preventDefault()
     if (!newEmpName) {
@@ -282,6 +180,7 @@ function App() {
     }
   }
 
+  // 員工狀態管理：改為離職
   const handleMarkResigned = async (emp) => {
     if (!window.confirm(`確定要將員工「${emp.employee_name}」設為離職狀態嗎？`)) return
     const { error } = await supabase.from('advances').update({ status: 'resigned' }).eq('id', emp.id)
@@ -289,6 +188,7 @@ function App() {
     else fetchData()
   }
 
+  // 員工狀態管理：刪除員工記錄
   const handleDeleteEmployee = async (emp) => {
     if (!window.confirm(`⚠️ 確定要永久刪除員工「${emp.employee_name}」及其所有預支記錄嗎？此動作無法復原！`)) return
     const { error } = await supabase.from('advances').delete().eq('id', emp.id)
@@ -296,12 +196,14 @@ function App() {
     else fetchData()
   }
 
+  // 員工狀態管理：恢復正常
   const handleRestoreEmployee = async (emp) => {
     const { error } = await supabase.from('advances').update({ status: 'active' }).eq('id', emp.id)
     if (error) alert('狀態更新失敗：' + error.message)
     else fetchData()
   }
 
+  // 新增預支資金明細
   const handleAddAdvanceTransaction = async (e) => {
     e.preventDefault()
     if (!selectedEmpIdForAdvance || !advanceAmt) {
@@ -336,6 +238,7 @@ function App() {
     await fetchData(records)
   }
 
+  // 刪除預支明細
   const handleDeleteAdvanceTransaction = async (det) => {
     if (!window.confirm('確定要刪除這筆預支記錄嗎？')) return
 
@@ -348,6 +251,7 @@ function App() {
     }
   }
 
+  // 提交支付薪金
   const handlePaySalary = async (e) => {
     e.preventDefault()
     if (!salaryEmployee || !salaryAmount) {
@@ -392,6 +296,7 @@ function App() {
     }
   }
 
+  // 清空主畫面表單
   const resetForm = () => {
     setType('expense')
     setAmount('')
@@ -407,6 +312,7 @@ function App() {
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
+  // 提交新增記錄
   const handleSubmit = async () => {
     if (!amount) {
       alert('請輸入金額！')
@@ -650,233 +556,7 @@ function App() {
     }
   }
 
-  // 客戶的 新增、編輯、刪除與狀態更新
-  const handleSaveCustomer = async (e) => {
-    e.preventDefault()
-    if (!newCustName.trim()) {
-      alert('請輸入客戶名稱！')
-      return
-    }
-
-    if (editingCustId) {
-      // 編輯更新
-      const { error } = await supabase.from('customers').update({
-        name: newCustName,
-        contact_person: newCustContact,
-        email: newCustEmail,
-        phone: newCustPhone,
-        address: newCustAddress,
-        status: newCustStatus
-      }).eq('id', editingCustId)
-
-      if (error) {
-        alert('更新客戶失敗: ' + error.message)
-      } else {
-        alert('✅ 客戶更新成功！')
-        setEditingCustId(null)
-        setNewCustName('')
-        setNewCustContact('')
-        setNewCustEmail('')
-        setNewCustPhone('')
-        setNewCustAddress('')
-        setNewCustStatus('active')
-        fetchData()
-      }
-    } else {
-      // 新增
-      const { error } = await supabase.from('customers').insert([
-        { 
-          name: newCustName, 
-          contact_person: newCustContact, 
-          email: newCustEmail, 
-          phone: newCustPhone, 
-          address: newCustAddress,
-          status: newCustStatus
-        }
-      ])
-      if (error) {
-        alert('新增客戶失敗: ' + error.message)
-      } else {
-        alert('✅ 客戶新增成功！')
-        setNewCustName('')
-        setNewCustContact('')
-        setNewCustEmail('')
-        setNewCustPhone('')
-        setNewCustAddress('')
-        setNewCustStatus('active')
-        fetchData()
-      }
-    }
-  }
-
-  const handleStartEditCustomer = (cust) => {
-    setEditingCustId(cust.id)
-    setNewCustName(cust.name || '')
-    setNewCustContact(cust.contact_person || '')
-    setNewCustEmail(cust.email || '')
-    setNewCustPhone(cust.phone || '')
-    setNewCustAddress(cust.address || '')
-    setNewCustStatus(cust.status || 'active')
-  }
-
-  const handleDeleteCustomer = async (custId) => {
-    if (!window.confirm('⚠️ 確定要刪除這位客戶嗎？')) return
-
-    const { error } = await supabase.from('customers').delete().eq('id', custId)
-    if (error) {
-      alert('刪除客戶失敗: ' + error.message)
-    } else {
-      alert('✅ 客戶已刪除')
-      fetchData()
-    }
-  }
-
-  const addItemRow = () => setItems([...items, { item_name: '', quantity: 1, unit_price: 0 }])
-  const updateItem = (index, field, value) => {
-    const newItems = [...items]
-    newItems[index][field] = value
-    setItems(newItems)
-  }
-  const removeItem = (index) => setItems(items.filter((_, i) => i !== index))
-  const subtotal = items.reduce((sum, item) => sum + (Number(item.quantity) * Number(item.unit_price)), 0)
-
-  const handleSaveDocument = async (e) => {
-    e.preventDefault()
-    if (!selectedCustomerId) {
-      alert('請選擇客戶！')
-      return
-    }
-
-    if (editingDocId) {
-      const { error: docError } = await supabase.from('documents').update({
-        type: docType,
-        customer_id: selectedCustomerId,
-        issue_date: issueDate,
-        due_date: docType === 'quotation' ? (dueDate || null) : null,
-        issued_by: issuedBy,
-        subtotal: subtotal,
-        total_amount: subtotal,
-        remark: docRemark
-      }).eq('id', editingDocId)
-
-      if (docError) {
-        alert('更新單據失敗: ' + docError.message)
-        return
-      }
-
-      await supabase.from('document_items').delete().eq('document_id', editingDocId)
-
-      const itemsToInsert = items.map(item => ({
-        document_id: editingDocId,
-        item_name: item.item_name,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        amount: Number(item.quantity) * Number(item.unit_price)
-      }))
-
-      await supabase.from('document_items').insert(itemsToInsert)
-
-      alert('✅ 單據更新成功！')
-      setEditingDocId(null)
-      setView('documents')
-      fetchData()
-    } else {
-      const finalDocNumber = await generateDocNumber(docType, issueDate, documents)
-
-      const { data: docResult, error: docError } = await supabase.from('documents').insert([
-        {
-          type: docType,
-          doc_number: finalDocNumber,
-          customer_id: selectedCustomerId,
-          issue_date: issueDate,
-          due_date: docType === 'quotation' ? (dueDate || null) : null,
-          issued_by: issuedBy,
-          subtotal: subtotal,
-          total_amount: subtotal,
-          remark: docRemark,
-          status: 'draft'
-        }
-      ]).select().single()
-
-      if (docError) {
-        alert('儲存失敗: ' + docError.message)
-        return
-      }
-
-      const docId = docResult.id
-      const itemsToInsert = items.map(item => ({
-        document_id: docId,
-        item_name: item.item_name,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        amount: Number(item.quantity) * Number(item.unit_price)
-      }))
-
-      const { error: itemError } = await supabase.from('document_items').insert(itemsToInsert)
-      if (itemError) {
-        alert('儲存明細失敗: ' + itemError.message)
-        return
-      }
-
-      alert('✅ 單據建立成功！')
-      setView('documents')
-      fetchData()
-    }
-  }
-
-  const handleStartEditDocument = async (doc) => {
-    setEditingDocId(doc.id)
-    setDocType(doc.type)
-    setDocNumber(doc.doc_number)
-    setSelectedCustomerId(doc.customer_id)
-    setIssueDate(doc.issue_date)
-    setDueDate(doc.due_date || '')
-    setIssuedBy(doc.issued_by || '')
-    setDocRemark(doc.remark || '')
-
-    const { data: itemsData } = await supabase
-      .from('document_items')
-      .select('*')
-      .eq('document_id', doc.id)
-
-    if (itemsData && itemsData.length > 0) {
-      setItems(itemsData.map(i => ({ item_name: i.item_name, quantity: i.quantity, unit_price: i.unit_price })))
-    } else {
-      setItems([{ item_name: '', quantity: 1, unit_price: 0 }])
-    }
-
-    setView('createDoc')
-  }
-
-  const handleUpdateDocStatus = async (docId, newStatus) => {
-    const { error } = await supabase
-      .from('documents')
-      .update({ status: newStatus })
-      .eq('id', docId)
-
-    if (error) {
-      alert('更新狀態失敗: ' + error.message)
-    } else {
-      fetchData()
-    }
-  }
-
-  const handleDeleteDocument = async (docId) => {
-    if (!window.confirm('⚠️ 確定要刪除這張單據嗎？此動作將同時刪除其品項明細且無法復原！')) return
-
-    const { error } = await supabase
-      .from('documents')
-      .delete()
-      .eq('id', docId)
-
-    if (error) {
-      alert('刪除單據失敗: ' + error.message)
-    } else {
-      alert('✅ 單據已成功刪除')
-      fetchData()
-    }
-  }
-
+  // 擴充過濾邏輯：加入開始與結束日期範圍篩選
   const filteredRecords = allRecords.filter(record => {
     const matchCategory = selectedCategoryFilter === 'all' || record.category === selectedCategoryFilter
     const matchType = selectedTypeFilter === 'all' || record.type === selectedTypeFilter
@@ -901,6 +581,7 @@ function App() {
     return matchCategory && matchType && matchStatus && matchSearch && matchDate
   })
 
+  // 計算篩選後記錄的總收入、總支出與淨額
   const filteredTotalIncome = filteredRecords
     .filter(r => r.type === 'income')
     .reduce((sum, r) => sum + Number(r.amount), 0)
@@ -919,106 +600,6 @@ function App() {
   const accountMethodOptions = ['轉賬匯款', '銀行轉賬', '支票', '現金']
   const activeEmployees = employees.filter(e => e.status === 'active')
 
-  // PDF 預覽模式
-  if (view === 'printPreview' && selectedPrintDoc) {
-    const cust = selectedPrintDoc.customerData || {}
-    return (
-      <div className="min-h-screen bg-white p-8 font-sans max-w-3xl mx-auto">
-        <style>{`
-          @media print {
-            .no-print {
-              display: none !important;
-            }
-          }
-        `}</style>
-        
-        <div className="flex justify-between items-center mb-6 no-print">
-          <button onClick={() => setView('documents')} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200">
-            ← 返回單據列表
-          </button>
-          <button onClick={() => window.print()} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow">
-            🖨️ 直接列印 / 存為 PDF
-          </button>
-        </div>
-
-        <div className="bg-white p-6 rounded-lg text-gray-800 font-sans relative">
-          <div className="flex justify-between items-start border-b pb-4 mb-4">
-            <div>
-              <h2 className="text-2xl font-bold text-blue-600">
-                {selectedPrintDoc.documentData.type === 'quotation' ? '報價單 QUOTATION' : '發票 INVOICE'}
-              </h2>
-              <p className="text-xs text-gray-600 mt-1">單號：<span className="font-bold text-gray-800">{selectedPrintDoc.documentData.doc_number}</span></p>
-            </div>
-            <div className="text-right text-xs text-gray-700 space-y-1">
-              <p>開立日期：{selectedPrintDoc.documentData.issue_date}</p>
-              {selectedPrintDoc.documentData.type === 'quotation' && selectedPrintDoc.documentData.due_date && (
-                <p>到期日：{selectedPrintDoc.documentData.due_date}</p>
-              )}
-              {selectedPrintDoc.documentData.issued_by && (
-                <p className="font-semibold text-gray-900">發出人：{selectedPrintDoc.documentData.issued_by}</p>
-              )}
-            </div>
-          </div>
-
-          <div className="bg-gray-50 p-3 rounded mb-4 text-xs space-y-1">
-            <p className="font-bold text-gray-700 mb-1">客戶資訊：</p>
-            <p className="text-gray-900 font-semibold text-sm">{cust.name || cust.company_name || '未知客戶'}</p>
-            <p className="text-gray-600">聯絡人：{cust.contact_person || cust.contact || '-'} | 電話：{cust.phone || '-'}</p>
-            {cust.email && <p className="text-gray-600">Email：{cust.email}</p>}
-            {cust.address && <p className="text-gray-600">Address：{cust.address}</p>}
-          </div>
-
-          <table className="w-full text-xs border-collapse mb-4">
-            <thead>
-              <tr className="bg-gray-800 text-white text-left">
-                <th className="p-2.5">項目說明</th>
-                <th className="p-2.5 text-center">數量</th>
-                <th className="p-2.5 text-right">單價</th>
-                <th className="p-2.5 text-right">小計</th>
-              </tr>
-            </thead>
-            <tbody>
-              {selectedPrintDoc.items.map((item, idx) => (
-                <tr key={idx} className="border-b">
-                  <td className="p-2.5">{item.item_name}</td>
-                  <td className="p-2.5 text-center">{item.quantity}</td>
-                  <td className="p-2.5 text-right">${Number(item.unit_price).toFixed(2)}</td>
-                  <td className="p-2.5 text-right font-bold">${(Number(item.quantity) * Number(item.unit_price)).toFixed(2)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="flex justify-end mb-4">
-            <div className="bg-gray-100 p-3 rounded text-right w-52">
-              <p className="text-[10px] text-gray-500">總金額 (Total Amount)</p>
-              <p className="text-xl font-bold text-emerald-600">${Number(selectedPrintDoc.documentData.total_amount).toFixed(2)}</p>
-            </div>
-          </div>
-
-          {selectedPrintDoc.documentData.remark && (
-            <div className="border-t pt-3 text-xs text-gray-600 mb-8">
-              <p className="font-bold mb-1">備註：</p>
-              <p>{selectedPrintDoc.documentData.remark}</p>
-            </div>
-          )}
-
-          {/* 公司印章區塊 */}
-          <div className="flex justify-end mt-6">
-            <div className="text-center relative">
-              <p className="text-[11px] text-gray-600 mb-1 font-semibold">STCCML Production</p>
-              <img 
-                src="/Chop.png" 
-                alt="公司印章" 
-                style={{ width: '130px', opacity: 0.85, mixBlendMode: 'multiply' }} 
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   return (
     <div className="min-h-screen bg-gray-100 p-4 font-sans flex justify-center items-start pt-10 pb-10">
       <input 
@@ -1031,10 +612,10 @@ function App() {
 
       <div className="w-full max-w-lg bg-white rounded-xl shadow-md overflow-hidden p-6">
         
-        {/* 頂部導覽列 */}
-        <div className="flex flex-col gap-3 mb-6 border-b pb-3 no-print">
+        {/* 頂部導覽切換與 Refresh 按鈕 */}
+        <div className="flex flex-col gap-3 mb-6 border-b pb-3">
           <div className="flex justify-between items-center gap-1 flex-wrap">
-            <div className="flex gap-1.5 flex-wrap">
+            <div className="flex gap-1.5">
               <button 
                 onClick={() => setView('home')}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'home' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
@@ -1047,55 +628,20 @@ function App() {
               >
                 全部歷史
               </button>
-              <button 
-                onClick={() => setView('documents')}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'documents' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-              >
-                單據記錄
-              </button>
-              <button 
-                onClick={() => {
-                  setEditingDocId(null)
-                  setDocType('quotation')
-                  setSelectedCustomerId('')
-                  setIssuedBy('')
-                  setDocRemark('')
-                  setItems([{ item_name: '', quantity: 1, unit_price: 0 }])
-                  setView('createDoc')
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'createDoc' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-              >
-                + 建立單據
-              </button>
-              <button 
-                onClick={() => {
-                  setEditingCustId(null)
-                  setNewCustName('')
-                  setNewCustContact('')
-                  setNewCustEmail('')
-                  setNewCustPhone('')
-                  setNewCustAddress('')
-                  setNewCustStatus('active')
-                  setView('customers')
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'customers' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-              >
-                客戶管理
-              </button>
             </div>
 
+            {/* 管理項目子目錄選單 */}
             <div className="flex items-center gap-2">
               <select
-                value={view === 'salary' || view === 'advances' || view === 'itemOptions' ? view : ''}
+                value={view === 'salary' || view === 'advances' ? view : ''}
                 onChange={(e) => {
                   if (e.target.value) setView(e.target.value)
                 }}
                 className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-bold outline-none cursor-pointer hover:bg-indigo-100 transition-colors"
               >
-                <option value="" disabled>⚙️ 其他管理...</option>
+                <option value="" disabled>⚙️ 管理項目...</option>
                 <option value="salary">💰 支付薪金</option>
                 <option value="advances">👥 預支管理</option>
-                <option value="itemOptions">📋 項目說明管理</option>
               </select>
             </div>
           </div>
@@ -1116,7 +662,10 @@ function App() {
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">支付薪金管理</h1>
-              <button onClick={() => setView('home')} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200">
+              <button 
+                onClick={() => setView('home')}
+                className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200"
+              >
                 ← 返回主畫面
               </button>
             </div>
@@ -1124,7 +673,11 @@ function App() {
             <form onSubmit={handlePaySalary} className="bg-amber-50 p-4 rounded-lg border border-amber-200 space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">選擇員工 <span className="text-red-500">*</span></label>
-                <select value={salaryEmployee} onChange={(e) => setSalaryEmployee(e.target.value)} className="w-full border rounded p-2 text-sm bg-white outline-none">
+                <select 
+                  value={salaryEmployee}
+                  onChange={(e) => setSalaryEmployee(e.target.value)}
+                  className="w-full border rounded p-2 text-sm bg-white outline-none"
+                >
                   <option value="">請選擇員工</option>
                   {activeEmployees.map(emp => (
                     <option key={emp.id} value={emp.employee_name}>{emp.employee_name}</option>
@@ -1134,28 +687,55 @@ function App() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">薪金金額 (HKD) <span className="text-red-500">*</span></label>
-                <input type="number" value={salaryAmount} onChange={(e) => setSalaryAmount(e.target.value)} className="w-full border rounded p-2 text-sm outline-none bg-white" placeholder="0.00" />
+                <input 
+                  type="number" 
+                  value={salaryAmount}
+                  onChange={(e) => setSalaryAmount(e.target.value)}
+                  className="w-full border rounded p-2 text-sm outline-none bg-white"
+                  placeholder="0.00"
+                />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">發放方式</label>
-                <select value={salaryMethod} onChange={(e) => setSalaryMethod(e.target.value)} className="w-full border rounded p-2 text-sm bg-white outline-none text-gray-700">
+                <select 
+                  value={salaryMethod}
+                  onChange={(e) => setSalaryMethod(e.target.value)}
+                  className="w-full border rounded p-2 text-sm bg-white outline-none text-gray-700"
+                >
                   <option value="">請選擇支付方式</option>
-                  {accountMethodOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+                  {accountMethodOptions.map(m => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
                 </select>
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">發放日期</label>
-                <input type="date" value={salaryDate} onChange={(e) => setSalaryDate(e.target.value)} className="w-full border rounded p-2 text-sm outline-none bg-white" />
+                <input 
+                  type="date" 
+                  value={salaryDate}
+                  onChange={(e) => setSalaryDate(e.target.value)}
+                  className="w-full border rounded p-2 text-sm outline-none bg-white"
+                />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">備註</label>
-                <input type="text" value={salaryRemark} onChange={(e) => setSalaryRemark(e.target.value)} className="w-full border rounded p-2 text-sm outline-none bg-white" placeholder="例如：本月薪金發放（選填）" />
+                <input 
+                  type="text" 
+                  value={salaryRemark}
+                  onChange={(e) => setSalaryRemark(e.target.value)}
+                  className="w-full border rounded p-2 text-sm outline-none bg-white"
+                  placeholder="例如：本月薪金發放（選填）"
+                />
               </div>
 
-              <button type="submit" disabled={isLoading} className="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm py-3 rounded-lg font-bold shadow">
+              <button 
+                type="submit"
+                disabled={isLoading}
+                className="w-full bg-amber-600 hover:bg-amber-700 text-white text-sm py-3 rounded-lg font-bold shadow"
+              >
                 {isLoading ? '處理中...' : '確認支付並記錄薪金'}
               </button>
             </form>
@@ -1165,7 +745,10 @@ function App() {
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">員工預支資金管理</h1>
-              <button onClick={() => setView('home')} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200">
+              <button 
+                onClick={() => setView('home')}
+                className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200"
+              >
                 ← 返回主畫面
               </button>
             </div>
@@ -1173,8 +756,16 @@ function App() {
             <form onSubmit={handleAddEmployee} className="bg-gray-50 p-3 rounded-lg border mb-4 space-y-2">
               <h2 className="text-xs font-bold text-gray-800">新增員工檔案</h2>
               <div className="flex gap-2">
-                <input type="text" value={newEmpName} onChange={(e) => setNewEmpName(e.target.value)} className="flex-1 border rounded p-1.5 text-xs outline-none bg-white" placeholder="請輸入員工姓名" />
-                <button type="submit" className="bg-gray-800 hover:bg-gray-900 text-white text-xs px-3 py-1.5 rounded font-bold">新增員工</button>
+                <input 
+                  type="text" 
+                  value={newEmpName}
+                  onChange={(e) => setNewEmpName(e.target.value)}
+                  className="flex-1 border rounded p-1.5 text-xs outline-none bg-white"
+                  placeholder="請輸入員工姓名"
+                />
+                <button type="submit" className="bg-gray-800 hover:bg-gray-900 text-white text-xs px-3 py-1.5 rounded font-bold">
+                  新增員工
+                </button>
               </div>
             </form>
 
@@ -1183,36 +774,67 @@ function App() {
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[10px] text-gray-600 mb-0.5">選擇員工</label>
-                  <select value={selectedEmpIdForAdvance} onChange={(e) => setSelectedEmpIdForAdvance(e.target.value)} className="w-full border rounded p-1.5 text-xs bg-white outline-none">
+                  <select 
+                    value={selectedEmpIdForAdvance}
+                    onChange={(e) => setSelectedEmpIdForAdvance(e.target.value)}
+                    className="w-full border rounded p-1.5 text-xs bg-white outline-none"
+                  >
                     <option value="">請選擇員工</option>
-                    {employees.map(emp => (<option key={emp.id} value={emp.id}>{emp.employee_name} ({emp.status === 'active' ? '正常' : '已離職/停用'})</option>))}
+                    {employees.map(emp => (
+                      <option key={emp.id} value={emp.id}>{emp.employee_name} ({emp.status === 'active' ? '正常' : '已離職/停用'})</option>
+                    ))}
                   </select>
                 </div>
                 <div>
                   <label className="block text-[10px] text-gray-600 mb-0.5">日期</label>
-                  <input type="date" value={advanceDate} onChange={(e) => setAdvanceDate(e.target.value)} className="w-full border rounded p-1.5 text-xs outline-none bg-white" />
+                  <input 
+                    type="date" 
+                    value={advanceDate}
+                    onChange={(e) => setAdvanceDate(e.target.value)}
+                    className="w-full border rounded p-1.5 text-xs outline-none bg-white"
+                  />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[10px] text-gray-600 mb-0.5">預支金額 (HKD)</label>
-                  <input type="number" value={advanceAmt} onChange={(e) => setAdvanceAmt(e.target.value)} className="w-full border rounded p-1.5 text-xs outline-none bg-white" placeholder="0.00" />
+                  <input 
+                    type="number" 
+                    value={advanceAmt}
+                    onChange={(e) => setAdvanceAmt(e.target.value)}
+                    className="w-full border rounded p-1.5 text-xs outline-none bg-white"
+                    placeholder="0.00"
+                  />
                 </div>
                 <div>
                   <label className="block text-[10px] text-gray-600 mb-0.5">預支方式</label>
-                  <select value={advanceMethod} onChange={(e) => setAdvanceMethod(e.target.value)} className="w-full border rounded p-1.5 text-xs bg-white outline-none text-gray-700">
-                    {accountMethodOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+                  <select 
+                    value={advanceMethod}
+                    onChange={(e) => setAdvanceMethod(e.target.value)}
+                    className="w-full border rounded p-1.5 text-xs bg-white outline-none text-gray-700"
+                  >
+                    {accountMethodOptions.map(m => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
                   </select>
                 </div>
               </div>
 
               <div>
                 <label className="block text-[10px] text-gray-600 mb-0.5">備註</label>
-                <input type="text" value={advanceRemark} onChange={(e) => setAdvanceRemark(e.target.value)} className="w-full border rounded p-1.5 text-xs outline-none bg-white" placeholder="備註說明（選填）" />
+                <input 
+                  type="text" 
+                  value={advanceRemark}
+                  onChange={(e) => setAdvanceRemark(e.target.value)}
+                  className="w-full border rounded p-1.5 text-xs outline-none bg-white"
+                  placeholder="備註說明（選填）"
+                />
               </div>
 
-              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 rounded font-bold shadow">記錄預支資金</button>
+              <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 rounded font-bold shadow">
+                記錄預支資金
+              </button>
             </form>
 
             <h2 className="text-sm font-bold text-gray-800 mb-2">員工狀態與預支餘額</h2>
@@ -1235,11 +857,26 @@ function App() {
                     <div className="flex gap-1">
                       {emp.status === 'active' ? (
                         <>
-                          <button onClick={() => handleMarkResigned(emp)} className="bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11px] font-semibold px-2 py-1 rounded">設為離職</button>
-                          <button onClick={() => handleDeleteEmployee(emp)} className="bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold px-2 py-1 rounded">刪除</button>
+                          <button 
+                            onClick={() => handleMarkResigned(emp)}
+                            className="bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11px] font-semibold px-2 py-1 rounded"
+                          >
+                            設為離職
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteEmployee(emp)}
+                            className="bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold px-2 py-1 rounded"
+                          >
+                            刪除
+                          </button>
                         </>
                       ) : (
-                        <button onClick={() => handleRestoreEmployee(emp)} className="bg-green-50 hover:bg-green-100 text-green-600 text-[11px] font-semibold px-2 py-1 rounded">恢復正常</button>
+                        <button 
+                          onClick={() => handleRestoreEmployee(emp)}
+                          className="bg-green-50 hover:bg-green-100 text-green-600 text-[11px] font-semibold px-2 py-1 rounded"
+                        >
+                          恢復正常
+                        </button>
                       )}
                     </div>
                   </div>
@@ -1260,347 +897,15 @@ function App() {
                         <p className="font-semibold text-gray-800">{emp ? emp.employee_name : '未知員工'} - <span className="text-indigo-600 font-bold">${det.amount.toFixed(2)}</span> ({det.method})</p>
                         <p className="text-[10px] text-gray-500">{det.date} {det.remark ? `| 備註：${det.remark}` : ''}</p>
                       </div>
-                      <button onClick={() => handleDeleteAdvanceTransaction(det)} className="text-red-500 hover:text-red-700 text-[11px] font-semibold bg-red-50 px-2 py-1 rounded">刪除</button>
+                      <button 
+                        onClick={() => handleDeleteAdvanceTransaction(det)}
+                        className="text-red-500 hover:text-red-700 text-[11px] font-semibold bg-red-50 px-2 py-1 rounded"
+                      >
+                        刪除
+                      </button>
                     </div>
                   )
                 })
-              )}
-            </div>
-          </>
-        ) : view === 'itemOptions' ? (
-          // ================= 項目說明管理面板 =================
-          <>
-            <div className="flex justify-between items-center mb-4">
-              <h1 className="text-xl font-bold text-gray-800">項目說明管理</h1>
-              <button onClick={() => setView('home')} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200">
-                ← 返回主畫面
-              </button>
-            </div>
-
-            <form onSubmit={handleAddItemOption} className="bg-gray-50 p-3 rounded-lg border mb-4 space-y-2">
-              <h2 className="text-xs font-bold text-gray-800">新增常用項目說明</h2>
-              <div className="flex gap-2">
-                <input 
-                  type="text" 
-                  value={newItemOptionName} 
-                  onChange={(e) => setNewItemOptionName(e.target.value)} 
-                  required 
-                  className="flex-1 border rounded p-1.5 text-xs bg-white outline-none" 
-                  placeholder="例如：Event Photography (活動拍攝)"
-                />
-                <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white text-xs px-3 py-1.5 rounded font-bold">
-                  新增項目
-                </button>
-              </div>
-            </form>
-
-            <h2 className="text-sm font-bold text-gray-800 mb-2">現有項目列表</h2>
-            <div className="space-y-2">
-              {commonItemOptions.length === 0 ? (
-                <p className="text-gray-500 text-center text-xs py-2">尚無常用項目</p>
-              ) : (
-                commonItemOptions.map(opt => (
-                  <div key={opt.id} className="bg-gray-50 p-2.5 rounded border flex justify-between items-center text-xs">
-                    {editingItemOptionId === opt.id ? (
-                      <div className="flex gap-2 flex-1 pr-2">
-                        <input 
-                          type="text" 
-                          value={editingItemOptionName} 
-                          onChange={(e) => setEditingItemOptionName(e.target.value)} 
-                          className="flex-1 border rounded p-1 text-xs bg-white outline-none"
-                        />
-                        <button onClick={() => handleUpdateItemOption(opt.id)} className="bg-green-600 text-white px-2 py-1 rounded font-bold">儲存</button>
-                        <button onClick={() => setEditingItemOptionId(null)} className="bg-gray-300 text-gray-700 px-2 py-1 rounded">取消</button>
-                      </div>
-                    ) : (
-                      <>
-                        <span className="font-medium text-gray-800">{opt.name}</span>
-                        <div className="flex gap-1">
-                          <button 
-                            onClick={() => { setEditingItemOptionId(opt.id); setEditingItemOptionName(opt.name); }} 
-                            className="bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1 rounded font-semibold"
-                          >
-                            編輯
-                          </button>
-                          <button 
-                            onClick={() => handleDeleteItemOption(opt.id)} 
-                            className="bg-red-50 text-red-600 hover:bg-red-100 px-2 py-1 rounded font-semibold"
-                          >
-                            刪除
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        ) : view === 'documents' ? (
-          // ================= 單據記錄列表 =================
-          <>
-            <div className="flex justify-between items-center mb-4">
-              <h1 className="text-xl font-bold text-gray-800">報價單與發票記錄</h1>
-              <button onClick={() => setView('home')} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200">
-                ← 返回主畫面
-              </button>
-            </div>
-            <div className="space-y-3">
-              {documents.length === 0 ? (
-                <p className="text-gray-500 text-center text-sm py-6">尚無單據記錄</p>
-              ) : (
-                documents.map(doc => (
-                  <div key={doc.id} className="bg-gray-50 p-3 rounded-lg border flex flex-col gap-2">
-                    <div className="flex justify-between items-center">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-gray-800">{doc.doc_number}</span>
-                          <span className={`text-xs px-2 py-0.5 rounded font-semibold ${doc.type === 'quotation' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-                            {doc.type === 'quotation' ? '報價單' : '發票'}
-                          </span>
-                        </div>
-                        <p className="text-xs text-gray-600 mt-1">客戶：{doc.customers?.name || doc.customers?.company_name || '未知客戶'} | 日期：{doc.issue_date}</p>
-                        {doc.issued_by && <p className="text-[11px] text-gray-500">發出人：{doc.issued_by}</p>}
-                      </div>
-                      <div className="text-right">
-                        <div className="font-bold text-gray-800">${Number(doc.total_amount).toFixed(2)}</div>
-                        <select 
-                          value={doc.status} 
-                          onChange={(e) => handleUpdateDocStatus(doc.id, e.target.value)}
-                          className="mt-1 text-[11px] uppercase bg-white border rounded px-1.5 py-0.5 font-bold text-gray-700 outline-none cursor-pointer"
-                        >
-                          <option value="draft">草稿 (Draft)</option>
-                          <option value="sent">已發送 (Sent)</option>
-                          <option value="paid">已付款 (Paid)</option>
-                          <option value="accepted">已接受 (Accepted)</option>
-                          <option value="cancelled">已取消 (Cancelled)</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="flex justify-end gap-2 pt-2 border-t border-gray-200">
-                      <button 
-                        onClick={() => handleStartEditDocument(doc)}
-                        className="bg-amber-50 text-amber-700 hover:bg-amber-100 text-xs font-bold px-3 py-1 rounded"
-                      >
-                        編輯 ✏️
-                      </button>
-                      <button 
-                        onClick={async () => {
-                          const { data: itemsData } = await supabase
-                            .from('document_items')
-                            .select('*')
-                            .eq('document_id', doc.id)
-                          
-                          setSelectedPrintDoc({
-                            documentData: doc,
-                            customerData: doc.customers,
-                            items: itemsData || []
-                          })
-                          setView('printPreview')
-                        }}
-                        className="bg-blue-50 text-blue-600 hover:bg-blue-100 text-xs font-bold px-3 py-1 rounded"
-                      >
-                        列印 PDF 📄
-                      </button>
-                      <button 
-                        onClick={() => handleDeleteDocument(doc.id)}
-                        className="bg-red-50 text-red-600 hover:bg-red-100 text-xs font-bold px-3 py-1 rounded"
-                      >
-                        刪除 🗑️
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
-        ) : view === 'createDoc' ? (
-          // ================= 建立 / 編輯單據表單 =================
-          <>
-            <div className="flex justify-between items-center mb-4">
-              <h1 className="text-xl font-bold text-gray-800">{editingDocId ? '編輯單據' : '建立新單據'}</h1>
-              <button onClick={() => setView('documents')} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200">
-                ← 返回單據列表
-              </button>
-            </div>
-            <form onSubmit={handleSaveDocument} className="bg-gray-50 p-4 rounded-lg border space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">單據類型</label>
-                  <select value={docType} onChange={async (e) => {
-                    const t = e.target.value
-                    setDocType(t)
-                    if (!editingDocId) {
-                      const newNum = await generateDocNumber(t, issueDate, documents)
-                      setDocNumber(newNum)
-                    }
-                  }} className="w-full border rounded p-2 text-xs bg-white outline-none">
-                    <option value="quotation">報價單</option>
-                    <option value="invoice">發票</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">單號</label>
-                  <input type="text" value={docNumber} readOnly className="w-full border rounded p-2 text-xs bg-gray-100 text-gray-600 outline-none font-mono" />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">選擇客戶 <span className="text-red-500">*</span></label>
-                <select value={selectedCustomerId} onChange={(e) => setSelectedCustomerId(e.target.value)} required className="w-full border rounded p-2 text-xs bg-white outline-none">
-                  <option value="">-- 請選擇客戶 --</option>
-                  {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                </select>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">開立日期</label>
-                  <input type="date" value={issueDate} onChange={async (e) => {
-                    const d = e.target.value
-                    setIssueDate(d)
-                    if (!editingDocId) {
-                      const newNum = await generateDocNumber(docType, d, documents)
-                      setDocNumber(newNum)
-                    }
-                  }} required className="w-full border rounded p-2 text-xs bg-white outline-none" />
-                </div>
-                {docType === 'quotation' && (
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1">到期日</label>
-                    <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full border rounded p-2 text-xs bg-white outline-none" />
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">發出人 (Issued By)</label>
-                <input type="text" value={issuedBy} onChange={(e) => setIssuedBy(e.target.value)} placeholder="例如：經理 / 財務部" className="w-full border rounded p-2 text-xs bg-white outline-none" />
-              </div>
-
-              <h3 className="text-xs font-bold text-gray-800 pt-2 border-t">品項明細</h3>
-              {items.map((item, index) => (
-                <div key={index} className="flex gap-2 items-center mb-2">
-                  <div className="flex-1">
-                    <input 
-                      list="common-items-list"
-                      type="text" 
-                      placeholder="項目說明（可下拉選取或手輸）" 
-                      value={item.item_name} 
-                      onChange={(e) => updateItem(index, 'item_name', e.target.value)} 
-                      required 
-                      className="w-full border rounded p-1.5 text-xs bg-white outline-none" 
-                    />
-                    <datalist id="common-items-list">
-                      {commonItemOptions.map(opt => <option key={opt.id} value={opt.name} />)}
-                    </datalist>
-                  </div>
-                  <input type="number" placeholder="數量" value={item.quantity} min="1" onChange={(e) => updateItem(index, 'quantity', e.target.value)} required className="w-16 border rounded p-1.5 text-xs bg-white outline-none" />
-                  <input type="number" placeholder="單價" value={item.unit_price} min="0" onChange={(e) => updateItem(index, 'unit_price', e.target.value)} required className="w-20 border rounded p-1.5 text-xs bg-white outline-none" />
-                  {items.length > 1 && <button type="button" onClick={() => removeItem(index)} className="text-red-500 text-xs font-bold px-1">刪除</button>}
-                </div>
-              ))}
-              <button type="button" onClick={addItemRow} className="bg-gray-200 text-gray-700 text-xs px-3 py-1 rounded font-semibold">+ 新增品項</button>
-
-              <div className="text-right font-bold text-sm text-gray-800 pt-2">
-                總金額：<span className="text-emerald-600">${subtotal.toFixed(2)}</span>
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">備註</label>
-                <textarea value={docRemark} onChange={(e) => setDocRemark(e.target.value)} rows={2} className="w-full border rounded p-2 text-xs outline-none bg-white" placeholder="付款條件等..."></textarea>
-              </div>
-
-              <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-3 rounded-lg font-bold shadow">
-                {editingDocId ? '儲存修改' : '儲存並建立單據'}
-              </button>
-            </form>
-          </>
-        ) : view === 'customers' ? (
-          // ================= 客戶管理面板 (支援編輯、刪除與有效/無效狀態) =================
-          <>
-            <div className="flex justify-between items-center mb-4">
-              <h1 className="text-xl font-bold text-gray-800">客戶管理</h1>
-              <button onClick={() => setView('home')} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200">
-                ← 返回主畫面
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveCustomer} className="bg-gray-50 p-3 rounded-lg border mb-4 space-y-2">
-              <h2 className="text-xs font-bold text-gray-800">{editingCustId ? '編輯客戶檔案' : '新增客戶檔案'}</h2>
-              <div>
-                <label className="block text-[10px] text-gray-600 mb-0.5">公司/客戶名稱 *</label>
-                <input type="text" value={newCustName} onChange={(e) => setNewCustName(e.target.value)} required className="w-full border rounded p-1.5 text-xs bg-white outline-none" />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[10px] text-gray-600 mb-0.5">聯絡人</label>
-                  <input type="text" value={newCustContact} onChange={(e) => setNewCustContact(e.target.value)} className="w-full border rounded p-1.5 text-xs bg-white outline-none" />
-                </div>
-                <div>
-                  <label className="block text-[10px] text-gray-600 mb-0.5">電話</label>
-                  <input type="text" value={newCustPhone} onChange={(e) => setNewCustPhone(e.target.value)} className="w-full border rounded p-1.5 text-xs bg-white outline-none" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-600 mb-0.5">Email</label>
-                <input type="email" value={newCustEmail} onChange={(e) => setNewCustEmail(e.target.value)} className="w-full border rounded p-1.5 text-xs bg-white outline-none" placeholder="example@domain.com" />
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-600 mb-0.5">Address</label>
-                <input type="text" value={newCustAddress} onChange={(e) => setNewCustAddress(e.target.value)} className="w-full border rounded p-1.5 text-xs bg-white outline-none" placeholder="公司地址" />
-              </div>
-              <div>
-                <label className="block text-[10px] text-gray-600 mb-0.5">狀態</label>
-                <select value={newCustStatus} onChange={(e) => setNewCustStatus(e.target.value)} className="w-full border rounded p-1.5 text-xs bg-white outline-none">
-                  <option value="active">有效 (Active)</option>
-                  <option value="inactive">無效 (Inactive)</option>
-                </select>
-              </div>
-
-              <div className="flex gap-2 pt-1">
-                <button type="submit" className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white text-xs py-2 rounded font-bold shadow">
-                  {editingCustId ? '儲存修改' : '儲存客戶'}
-                </button>
-                {editingCustId && (
-                  <button type="button" onClick={() => {
-                    setEditingCustId(null)
-                    setNewCustName('')
-                    setNewCustContact('')
-                    setNewCustEmail('')
-                    setNewCustPhone('')
-                    setNewCustAddress('')
-                    setNewCustStatus('active')
-                  }} className="bg-gray-300 text-gray-700 text-xs px-3 py-2 rounded font-bold">
-                    取消
-                  </button>
-                )}
-              </div>
-            </form>
-
-            <h2 className="text-sm font-bold text-gray-800 mb-2">客戶列表</h2>
-            <div className="space-y-2">
-              {customers.length === 0 ? (
-                <p className="text-gray-500 text-center text-xs py-2">尚無客戶記錄</p>
-              ) : (
-                customers.map(c => (
-                  <div key={c.id} className="bg-gray-50 p-2.5 rounded border text-xs space-y-1">
-                    <div className="flex justify-between items-center">
-                      <span className="font-bold text-gray-800 text-sm">{c.name}</span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${c.status === 'inactive' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                        {c.status === 'inactive' ? '無效' : '有效'}
-                      </span>
-                    </div>
-                    <p className="text-gray-500 text-[11px]">聯絡人：{c.contact_person || '-'} | 電話：{c.phone || '-'}</p>
-                    <p className="text-gray-500 text-[11px]">Email：{c.email || '-'}</p>
-                    <p className="text-gray-500 text-[11px]">Address：{c.address || '-'}</p>
-                    <div className="flex justify-end gap-1 pt-1 border-t">
-                      <button onClick={() => handleStartEditCustomer(c)} className="bg-amber-50 text-amber-700 px-2 py-1 rounded font-semibold">編輯 ✏️</button>
-                      <button onClick={() => handleDeleteCustomer(c.id)} className="bg-red-50 text-red-600 px-2 py-1 rounded font-semibold">刪除 🗑️</button>
-                    </div>
-                  </div>
-                ))
               )}
             </div>
           </>
@@ -1828,8 +1133,22 @@ function App() {
                               <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
                             )}
                             <span className="font-medium text-gray-800 min-w-[5em]">{record.item_name || '未填寫品名'}</span>
+                            {record.type === 'income' ? (
+                              record.is_reimbursed && (
+                                <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">
+                                  已入賬 {record.account_method ? `(${record.account_method})` : ''}
+                                </span>
+                              )
+                            ) : (
+                              record.is_reimbursed && (
+                                <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">
+                                  已報銷 {record.reimburser ? `[報銷者: ${record.reimburser}]` : ''} {record.reimbursement_method ? `(${record.reimbursement_method})` : ''}
+                                </span>
+                              )
+                            )}
                           </div>
                           <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
+                          {record.remark && <p className="text-xs text-gray-600 mt-0.5">備註：{record.remark}</p>}
                         </div>
                         <div className="flex flex-col items-end gap-1.5 shrink-0">
                           <div className={`font-bold w-32 text-right ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
@@ -1862,7 +1181,7 @@ function App() {
           <>
             <div className="flex justify-between items-center mb-6">
               <button 
-                onClick={() => { setSelectedIds([]); setInlineEditingId(null); setView('home'); }}
+                onClick={() => { setSelectedIds(); setInlineEditingId(null); setView('home'); }}
                 className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200"
               >
                 ← 返回主畫面新增
@@ -1871,7 +1190,7 @@ function App() {
               <div className="w-16"></div>
             </div>
 
-            {/* 篩選控制列 */}
+            {/* 篩選控制列 (加入日期範圍與名稱關鍵字篩選) */}
             <div className="mb-4 space-y-2 bg-gray-50 p-3 rounded-lg border border-gray-200">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-gray-700">名稱關鍵字：</label>
@@ -1889,6 +1208,7 @@ function App() {
                 />
               </div>
 
+              {/* 日期範圍篩選 */}
               <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                 <label className="text-sm font-medium text-gray-700">開始日期：</label>
                 <input 
@@ -1981,7 +1301,7 @@ function App() {
               </div>
             </div>
 
-            {/* 統計資訊列 */}
+            {/* 篩選結果加總統計資訊列 */}
             <div className="mb-4 bg-emerald-50 border border-emerald-200 p-3 rounded-lg text-xs space-y-1">
               <div className="font-bold text-emerald-900 mb-1">📊 篩選結果加總統計（共 {filteredRecords.length} 筆記錄）：</div>
               <div className="flex justify-between text-emerald-800">
@@ -2022,6 +1342,7 @@ function App() {
                   return (
                     <div key={record.id} className={`p-3 rounded-lg border transition-colors flex flex-col gap-2 ${isChecked ? 'bg-blue-50 border-blue-300' : (isInlineEditing ? 'bg-amber-50/40 border-amber-300' : 'bg-gray-50 border-gray-100')}`}>
                       {isInlineEditing ? (
+                        // ================= 行內編輯狀態 =================
                         <div className="space-y-3 bg-white p-3 rounded-lg border border-amber-300">
                           <div className="flex justify-between items-center text-xs font-bold text-amber-800">
                             <span>✏️ 修改記錄 #{record.id.slice(0, 8)}</span>
@@ -2103,12 +1424,68 @@ function App() {
                             </div>
                           </div>
 
+                          {inlineForm.type === 'income' ? (
+                            <div>
+                              <label className="block text-[10px] text-gray-500 mb-0.5">入賬方式</label>
+                              <select 
+                                value={inlineForm.account_method}
+                                onChange={(e) => setInlineForm({ ...inlineForm, account_method: e.target.value })}
+                                className="w-full border rounded p-1.5 text-xs bg-white outline-none text-gray-700"
+                              >
+                                <option value="">請選擇入賬方式</option>
+                                {accountMethodOptions.map((method) => (
+                                  <option key={method} value={method}>{method}</option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <div>
+                                <label className="block text-[10px] text-gray-500 mb-0.5">報銷者</label>
+                                <select 
+                                  value={inlineForm.reimburser}
+                                  onChange={(e) => setInlineForm({ ...inlineForm, reimburser: e.target.value })}
+                                  className="w-full border rounded p-1.5 text-xs bg-white outline-none text-gray-700"
+                                >
+                                  <option value="">請選擇報銷者</option>
+                                  {employees.map(emp => (
+                                    <option key={emp.id} value={emp.employee_name}>{emp.employee_name}</option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-[10px] text-gray-500 mb-0.5">報銷方式</label>
+                                <select 
+                                  value={inlineForm.reimbursement_method}
+                                  onChange={(e) => setInlineForm({ ...inlineForm, reimbursement_method: e.target.value })}
+                                  className="w-full border rounded p-1.5 text-xs bg-white outline-none text-gray-700"
+                                >
+                                  <option value="">請選擇報銷方式</option>
+                                  {accountMethodOptions.map((method) => (
+                                    <option key={method} value={method}>{method}</option>
+                                  ))}
+                                </select>
+                              </div>
+                            </div>
+                          )}
+
+                          <div>
+                            <label className="block text-[10px] text-gray-500 mb-0.5">備註</label>
+                            <input 
+                              type="text" 
+                              value={inlineForm.remark}
+                              onChange={(e) => setInlineForm({ ...inlineForm, remark: e.target.value })}
+                              className="w-full border rounded p-1.5 text-sm outline-none"
+                            />
+                          </div>
+
                           <div className="flex gap-2 pt-1">
                             <button onClick={() => handleSaveInlineEdit(record.id)} disabled={isLoading} className="flex-1 bg-amber-600 text-white text-xs py-2 rounded font-bold">儲存修改</button>
                             <button onClick={() => setInlineEditingId(null)} className="flex-1 bg-gray-200 text-gray-700 text-xs py-2 rounded font-bold">取消</button>
                           </div>
                         </div>
                       ) : (
+                        // ================= 一般檢視狀態 =================
                         <>
                           <div className="flex justify-between items-center">
                             <div className="flex items-center gap-3 flex-1 pr-2">
@@ -2124,10 +1501,25 @@ function App() {
                                     <span className="text-xs font-semibold px-2 py-0.5 bg-blue-100 text-blue-700 rounded">{record.category}</span>
                                   )}
                                   <span className="font-medium text-gray-800 min-w-[5em]">{record.item_name || '未填寫品名'}</span>
+                                  {record.type === 'income' ? (
+                                    record.is_reimbursed && (
+                                      <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">
+                                        已入賬 {record.account_method ? `(${record.account_method})` : ''}
+                                      </span>
+                                    )
+                                  ) : (
+                                    record.is_reimbursed && (
+                                      <span className="text-xs font-semibold px-2 py-0.5 bg-green-100 text-green-700 rounded">
+                                        已報銷 {record.reimburser ? `[報銷者: ${record.reimburser}]` : ''} {record.reimbursement_method ? `(${record.reimbursement_method})` : ''}
+                                      </span>
+                                    )
+                                  )}
                                 </div>
                                 <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
+                                {record.remark && <p className="text-xs text-gray-600 mt-0.5">備註：{record.remark}</p>}
                               </div>
                             </div>
+
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
                               <div className={`font-bold w-32 text-right ${record.type === 'income' ? 'text-green-600' : 'text-red-600'}`}>
                                 {record.type === 'income' ? '+' : '-'}${Number(record.amount).toFixed(2)}
@@ -2138,6 +1530,23 @@ function App() {
                               </div>
                             </div>
                           </div>
+
+                          <div className="flex justify-between items-center text-xs pl-7 pt-1">
+                            {record.receipt_url ? (
+                              <a href={record.receipt_url} target="_blank" rel="noreferrer" className="text-blue-600 underline">查看收據相片 📷</a>
+                            ) : (
+                              <span className="text-gray-400">無收據</span>
+                            )}
+                            <button
+                              onClick={() => {
+                                setUploadingRecordId(record.id)
+                                if (historyFileInputRef.current) historyFileInputRef.current.click()
+                              }}
+                              className="text-indigo-600 font-medium bg-indigo-50 px-2 py-1 rounded"
+                            >
+                              {record.receipt_url ? '更換收據' : '＋ 上傳收據'}
+                            </button>
+                          </div>
                         </>
                       )}
                     </div>
@@ -2146,6 +1555,7 @@ function App() {
               )}
             </div>
 
+            {/* 分頁按鈕控制列 */}
             {totalPages > 1 && (
               <div className="flex justify-between items-center mb-4 bg-gray-50 p-3 rounded-lg border">
                 <button onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-3 py-1.5 bg-white border rounded text-sm font-semibold disabled:opacity-40">← 上一頁</button>
