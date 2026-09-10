@@ -1058,7 +1058,6 @@ function App() {
     }
   }
 
-  // 報價單與發票篩選過濾邏輯
   const filteredDocuments = documents.filter(doc => {
     const matchType = docFilterType === 'all' || doc.type === docFilterType
     const matchStatus = docFilterStatus === 'all' || doc.status === docFilterStatus
@@ -1425,7 +1424,6 @@ function App() {
               <button type="submit" className="w-full bg-gray-800 hover:bg-gray-900 text-white text-xs py-1.5 rounded font-bold shadow">新增員工</button>
             </form>
 
-            {/* 新增預支資金記錄表單（「日期」輸入框已精確限制寬度） */}
             <form onSubmit={handleAddAdvanceTransaction} className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 mb-6 space-y-2.5">
               <h2 className="text-xs font-bold text-indigo-900">新增預支資金記錄</h2>
               <div className="grid grid-cols-2 gap-2 items-center">
@@ -1442,7 +1440,7 @@ function App() {
                     type="date" 
                     value={advanceDate} 
                     onChange={(e) => setAdvanceDate(e.target.value)} 
-                    className="w-full max-w-[120px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
+                    className="w-full max-w-[160px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
                   />
                 </div>
               </div>
@@ -1468,7 +1466,7 @@ function App() {
               <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 rounded font-bold shadow">記錄預支資金</button>
             </form>
 
-            {/* 員工狀態與預支餘額（伸縮式顯示） */}
+            {/* 員工狀態與預支餘額（剩餘餘額已移至累計預支正下方換行顯示） */}
             <div className="mb-4 border rounded-lg bg-white overflow-hidden shadow-sm">
               <button
                 type="button"
@@ -1519,8 +1517,8 @@ function App() {
                               </div>
                             </div>
                           ) : (
-                            <div className="flex justify-between items-center">
-                              <div>
+                            <div className="flex justify-between items-start">
+                              <div className="space-y-1">
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-bold text-gray-800 text-sm">{emp.employee_name}</span>
                                   {emp.role && (
@@ -1532,10 +1530,11 @@ function App() {
                                     {emp.status === 'active' ? '正常' : '已離職/停用'}
                                   </span>
                                 </div>
-                                <p className="text-[11px] text-gray-500 mt-1">累計預支：${emp.initial_amount.toFixed(2)} | 剩餘餘額：<strong className="text-indigo-600">${emp.balance.toFixed(2)}</strong></p>
+                                <p className="text-[11px] text-gray-600">累計預支：${emp.initial_amount.toFixed(2)}</p>
+                                <p className="text-[11px] text-gray-600">剩餘餘額：<strong className="text-indigo-600">${emp.balance.toFixed(2)}</strong></p>
                               </div>
 
-                              <div className="flex gap-1 items-center">
+                              <div className="flex gap-1 items-center pt-0.5">
                                 <button onClick={() => handleStartEditEmployee(emp)} className="bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11px] font-semibold px-2 py-1 rounded">編輯 ✏️</button>
                                 {emp.status === 'active' ? (
                                   <>
@@ -1736,7 +1735,7 @@ function App() {
             </div>
           </>
         ) : view === 'documents' ? (
-          // ================= 報價單與發票記錄（具備 Filter 篩選功能） =================
+          // ================= 報價單與發票記錄 =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">報價單與發票記錄</h1>
