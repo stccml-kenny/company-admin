@@ -623,9 +623,9 @@ function App() {
         item_name: inlineForm.item_name,
         type: inlineForm.type,
         is_reimbursed: inlineForm.is_reimbursed,
-        account_method: inlineForm.type === 'income' && inlineForm.is_reimbursed ? inlineForm.account_method : null,
-        reimburser: inlineForm.type === 'expense' && inlineForm.is_reimbursed ? inlineForm.reimburser : null,
-        reimbursement_method: inlineForm.type === 'expense' && inlineForm.is_reimbursed ? inlineForm.reimbursement_method : null,
+        account_method: inlineForm.account_method || null,
+        reimburser: inlineForm.reimburser || null,
+        reimbursement_method: inlineForm.reimbursement_method || null,
         remark: inlineForm.remark,
         transaction_date: inlineForm.transaction_date
       }
@@ -1268,7 +1268,7 @@ function App() {
                   type="date" 
                   value={salaryDate} 
                   onChange={(e) => setSalaryDate(e.target.value)} 
-                  className="w-full box-border max-w-full min-w-0 block border rounded p-2 text-sm outline-none bg-white [color-scheme:light]" 
+                  className="w-full max-w-[220px] box-border min-w-0 block border rounded p-2 text-sm outline-none bg-white [color-scheme:light]" 
                 />
               </div>
 
@@ -1316,7 +1316,7 @@ function App() {
                     type="date" 
                     value={advanceDate} 
                     onChange={(e) => setAdvanceDate(e.target.value)} 
-                    className="w-full box-border max-w-full min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
+                    className="w-full max-w-[220px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
                   />
                 </div>
               </div>
@@ -1543,7 +1543,7 @@ function App() {
             </div>
           </>
         ) : view === 'createDoc' ? (
-          // ================= 建立 / 編輯單據表單 =================
+          // ================= 建立 / 編輯單據表單（日期輸入框寬度縮短至合適尺寸） =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">{editingDocId ? '編輯單據' : '建立新單據'}</h1>
@@ -1581,7 +1581,7 @@ function App() {
                 </select>
               </div>
 
-              {/* 開立日期：排版、寬度與上層方框完全一致 */}
+              {/* 開立日期：設定 max-w-[220px] 縮短寬度，避免拉伸過長 */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">開立日期</label>
                 <input 
@@ -1596,11 +1596,11 @@ function App() {
                     }
                   }} 
                   required 
-                  className="w-full box-border max-w-full min-w-0 block border rounded p-2 text-xs bg-white outline-none [color-scheme:light]" 
+                  className="w-full max-w-[220px] box-border min-w-0 block border rounded p-2 text-xs bg-white outline-none [color-scheme:light]" 
                 />
               </div>
 
-              {/* 到期日：在開立日期正下方，僅報價單時顯示，排版一致 */}
+              {/* 到期日：在開立日期正下方，僅報價單顯示，寬度同樣縮短為 max-w-[220px] */}
               {docType === 'quotation' && (
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">到期日</label>
@@ -1608,7 +1608,7 @@ function App() {
                     type="date" 
                     value={dueDate} 
                     onChange={(e) => setDueDate(e.target.value)} 
-                    className="w-full box-border max-w-full min-w-0 block border rounded p-2 text-xs bg-white outline-none [color-scheme:light]" 
+                    className="w-full max-w-[220px] box-border min-w-0 block border rounded p-2 text-xs bg-white outline-none [color-scheme:light]" 
                   />
                 </div>
               )}
@@ -1900,7 +1900,7 @@ function App() {
                   type="date" 
                   value={transactionDate} 
                   onChange={(e) => setTransactionDate(e.target.value)} 
-                  className="w-full box-border max-w-full min-w-0 block border border-gray-300 rounded-lg p-3 focus:border-blue-500 outline-none text-gray-700 [color-scheme:light]" 
+                  className="w-full max-w-[220px] box-border min-w-0 block border border-gray-300 rounded-lg p-3 focus:border-blue-500 outline-none text-gray-700 [color-scheme:light]" 
                 />
               </div>
 
@@ -2429,7 +2429,7 @@ function App() {
                                 type="date" 
                                 value={inlineForm.transaction_date} 
                                 onChange={(e) => setInlineForm({ ...inlineForm, transaction_date: e.target.value })} 
-                                className="w-full box-border max-w-full min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
+                                className="w-full max-w-[220px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
                               />
                             </div>
                           </div>
