@@ -73,8 +73,6 @@ function App() {
   const [startDate, setStartDate] = useState('') 
   const [endDate, setEndDate] = useState('') 
   const [currentPage, setCurrentPage] = useState(1)
-  
-  // 每頁顯示記錄筆數（預設 5 筆，可選 5, 10, 15, 20）
   const [recordsPerPage, setRecordsPerPage] = useState(5)
 
   const [selectedIds, setSelectedIds] = useState([])
@@ -1535,7 +1533,7 @@ function App() {
             </div>
           </>
         ) : view === 'createDoc' ? (
-          // ================= 建立 / 編輯單據表單 =================
+          // ================= 建立 / 編輯單據表單（已將到期日改為標準日期輸入框與適當寬度） =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">{editingDocId ? '編輯單據' : '建立新單據'}</h1>
@@ -1573,22 +1571,34 @@ function App() {
                 </select>
               </div>
 
+              {/* 修正：將開立日期與到期日改為一致的 grid-cols-2 與統一的 class (w-full border rounded p-2 text-xs bg-white outline-none) */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">開立日期</label>
-                  <input type="date" value={issueDate} onChange={async (e) => {
-                    const d = e.target.value
-                    setIssueDate(d)
-                    if (!editingDocId) {
-                      const newNum = await generateDocNumber(docType, d, documents)
-                      setDocNumber(newNum)
-                    }
-                  }} required className="w-full border rounded p-2 text-xs bg-white outline-none" />
+                  <input 
+                    type="date" 
+                    value={issueDate} 
+                    onChange={async (e) => {
+                      const d = e.target.value
+                      setIssueDate(d)
+                      if (!editingDocId) {
+                        const newNum = await generateDocNumber(docType, d, documents)
+                        setDocNumber(newNum)
+                      }
+                    }} 
+                    required 
+                    className="w-full border rounded p-2 text-xs bg-white outline-none" 
+                  />
                 </div>
                 {docType === 'quotation' && (
                   <div>
                     <label className="block text-xs font-medium text-gray-700 mb-1">到期日</label>
-                    <input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="w-full border rounded p-2 text-xs bg-white outline-none" />
+                    <input 
+                      type="date" 
+                      value={dueDate} 
+                      onChange={(e) => setDueDate(e.target.value)} 
+                      className="w-full border rounded p-2 text-xs bg-white outline-none" 
+                    />
                   </div>
                 )}
               </div>
@@ -2077,7 +2087,7 @@ function App() {
               <div className="w-16"></div>
             </div>
 
-            {/* 篩選控制列與每頁顯示筆數選擇器 */}
+            {/* 篩選控制列 */}
             <div className="mb-4 space-y-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium text-gray-700">每頁顯示筆數：</label>
