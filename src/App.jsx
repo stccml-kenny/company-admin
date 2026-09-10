@@ -66,7 +66,6 @@ function App() {
   const [salaryDate, setSalaryDate] = useState(new Date().toISOString().split('T')[0])
   const [salaryRemark, setSalaryRemark] = useState('')
 
-  // 類別多選篩選 Array State
   const [selectedCategories, setSelectedCategories] = useState([])
   const [selectedTypeFilter, setSelectedTypeFilter] = useState('all') 
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('all') 
@@ -74,9 +73,19 @@ function App() {
   const [startDate, setStartDate] = useState('') 
   const [endDate, setEndDate] = useState('') 
   const [currentPage, setCurrentPage] = useState(1)
-  const recordsPerPage = 5
+  
+  // 每頁顯示記錄筆數（預設 5 筆，可選 5, 10, 15, 20）
+  const [recordsPerPage, setRecordsPerPage] = useState(5)
 
   const [selectedIds, setSelectedIds] = useState([])
+
+  const [isBatchEditing, setIsBatchEditing] = useState(false)
+  const [batchForm, setBatchForm] = useState({
+    is_reimbursed: true,
+    reimburser: '',
+    reimbursement_method: '',
+    remark: ''
+  })
 
   const [inlineEditingId, setInlineEditingId] = useState(null)
   const [inlineForm, setInlineForm] = useState({
@@ -526,6 +535,49 @@ function App() {
     await fetchData(records)
   }
 
+  const handleBatchUpdateSubmit = async () => {
+    if (selectedIds.length === 0) return
+    if (!window.confirm(`確定要將選取的 ${selectedIds.length} 筆記錄進行批次修改嗎？`)) return
+
+    setIsLoading(true)
+    try {
+      for (const id of selectedIds) {
+        const target = allRecords.find(r => r.id === id)
+        if (!target) continue
+
+        const updatePayload = {
+          is_reimbursed: batchForm.is_reimbursed,
+          remark: batchForm.remark !== '' ? batchForm.remark : target.remark
+        }
+
+        if (batchForm.reimbursement_method) {
+          updatePayload.reimbursement_method = batchForm.reimbursement_method
+          updatePayload.reimburser = batchForm.reimburser || target.reimburser
+          updatePayload.advance_deduction_employee = batchForm.reimburser || target.reimburser || target.advance_deduction_employee
+          updatePayload.advance_deduction_amount = batchForm.is_reimbursed ? Number(target.amount || 0) : 0
+        } else if (batchForm.reimburser) {
+          updatePayload.reimburser = batchForm.reimburser
+          updatePayload.advance_deduction_employee = batchForm.reimburser
+          updatePayload.advance_deduction_amount = batchForm.is_reimbursed ? Number(target.amount || 0) : 0
+        } else if (!batchForm.is_reimbursed) {
+          updatePayload.advance_deduction_amount = 0
+        }
+
+        await supabase.from('transactions').update(updatePayload).eq('id', id)
+      }
+
+      alert('✅ 批次修改完成！')
+      setIsBatchEditing(false)
+      setSelectedIds([])
+      const records = await fetchRecords()
+      await fetchData(records)
+    } catch (err) {
+      alert('❌ 批次修改失敗：' + err.message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
   const handleBatchDelete = async () => {
     if (selectedIds.length === 0) return
     if (!window.confirm(`⚠️ 確定要刪除選取的 ${selectedIds.length} 筆記錄嗎？`)) return
@@ -550,7 +602,7 @@ function App() {
       type: record.type || 'expense',
       is_reimbursed: !!record.is_reimbursed,
       account_method: record.account_method || '',
-      reimburser: record.reimburser || '',
+      reimburser: record.reimburser || record.advance_deduction_employee || '',
       reimbursement_method: record.reimbursement_method || '',
       remark: record.remark || '',
       transaction_date: record.transaction_date ? record.transaction_date.toString().split('T')[0] : new Date().toISOString().split('T')[0]
@@ -567,20 +619,27 @@ function App() {
 
     setIsLoading(true)
     try {
+      const updateData = {
+        amount: newAmount,
+        category: inlineForm.category,
+        item_name: inlineForm.item_name,
+        type: inlineForm.type,
+        is_reimbursed: inlineForm.is_reimbursed,
+        account_method: inlineForm.account_method || null,
+        reimburser: inlineForm.reimburser || null,
+        reimbursement_method: inlineForm.reimbursement_method || null,
+        remark: inlineForm.remark,
+        transaction_date: inlineForm.transaction_date
+      }
+
+      if (inlineForm.type === 'expense') {
+        updateData.advance_deduction_employee = inlineForm.is_reimbursed ? inlineForm.reimburser : null
+        updateData.advance_deduction_amount = inlineForm.is_reimbursed ? newAmount : 0
+      }
+
       const { error } = await supabase
         .from('transactions')
-        .update({
-          amount: newAmount,
-          category: inlineForm.category,
-          item_name: inlineForm.item_name,
-          type: inlineForm.type,
-          is_reimbursed: inlineForm.is_reimbursed,
-          account_method: inlineForm.account_method || null,
-          reimburser: inlineForm.reimburser || null,
-          reimbursement_method: inlineForm.reimbursement_method || null,
-          remark: inlineForm.remark,
-          transaction_date: inlineForm.transaction_date
-        })
+        .update(updateData)
         .eq('id', id)
 
       if (error) throw error
@@ -906,7 +965,6 @@ function App() {
     }
   }
 
-  // 類別多選篩選邏輯
   const filteredRecords = allRecords.filter(record => {
     const matchCategory = selectedCategories.length === 0 || (record.category && selectedCategories.includes(record.category))
     const matchType = selectedTypeFilter === 'all' || record.type === selectedTypeFilter
@@ -940,6 +998,15 @@ function App() {
     .reduce((sum, r) => sum + Number(r.amount), 0)
 
   const filteredNetBalance = filteredTotalIncome - filteredTotalExpense
+
+  const selectedRecordsList = allRecords.filter(r => selectedIds.includes(r.id))
+  const selectedTotalIncome = selectedRecordsList
+    .filter(r => r.type === 'income')
+    .reduce((sum, r) => sum + Number(r.amount), 0)
+  const selectedTotalExpense = selectedRecordsList
+    .filter(r => r.type === 'expense')
+    .reduce((sum, r) => sum + Number(r.amount), 0)
+  const selectedNetBalance = selectedTotalIncome - selectedTotalExpense
 
   const indexOfLastRecord = currentPage * recordsPerPage
   const indexOfFirstRecord = indexOfLastRecord - recordsPerPage
@@ -1091,7 +1158,7 @@ function App() {
                 記賬主畫面
               </button>
               <button 
-                onClick={() => { setSelectedCategories([]); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setView('all'); }}
+                onClick={() => { setSelectedCategories([]); setSelectedTypeFilter('all'); setSelectedStatusFilter('all'); setSearchText(''); setStartDate(''); setEndDate(''); setCurrentPage(1); setSelectedIds([]); setIsBatchEditing(false); setView('all'); }}
                 className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'all' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
               >
                 全部歷史
@@ -1997,11 +2064,11 @@ function App() {
             </div>
           </>
         ) : (
-          // ================= 全部歷史記錄頁面（具備類別多選篩選與狀態標籤） =================
+          // ================= 全部歷史記錄頁面 =================
           <>
             <div className="flex justify-between items-center mb-6">
               <button 
-                onClick={() => { setSelectedIds([]); setInlineEditingId(null); setView('home'); }}
+                onClick={() => { setSelectedIds([]); setIsBatchEditing(false); setInlineEditingId(null); setView('home'); }}
                 className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200"
               >
                 ← 返回主畫面新增
@@ -2010,9 +2077,27 @@ function App() {
               <div className="w-16"></div>
             </div>
 
-            {/* 篩選控制列 */}
+            {/* 篩選控制列與每頁顯示筆數選擇器 */}
             <div className="mb-4 space-y-3 bg-gray-50 p-3 rounded-lg border border-gray-200">
               <div className="flex items-center justify-between">
+                <label className="text-sm font-medium text-gray-700">每頁顯示筆數：</label>
+                <select
+                  value={recordsPerPage}
+                  onChange={(e) => {
+                    setRecordsPerPage(Number(e.target.value))
+                    setCurrentPage(1)
+                    setSelectedIds([])
+                  }}
+                  className="border border-gray-300 rounded-lg p-2 text-sm bg-white outline-none w-48 text-gray-700 font-bold"
+                >
+                  <option value={5}>5 筆</option>
+                  <option value={10}>10 筆</option>
+                  <option value={15}>15 筆</option>
+                  <option value={20}>20 筆</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                 <label className="text-sm font-medium text-gray-700">名稱關鍵字：</label>
                 <input 
                   type="text"
@@ -2100,7 +2185,7 @@ function App() {
                 </div>
               )}
 
-              {/* 類別多選篩選區塊 (Checkbox) */}
+              {/* 類別多選篩選區塊 */}
               <div className="pt-2 border-t border-gray-200 space-y-1.5">
                 <div className="flex justify-between items-center">
                   <label className="text-sm font-medium text-gray-700">類別篩選 (可多選)：</label>
@@ -2149,9 +2234,9 @@ function App() {
               </div>
             </div>
 
-            {/* 批次操作控制列 */}
-            <div className="mb-4 bg-blue-50 border border-blue-200 p-3 rounded-lg">
-              <div className="flex justify-between items-center mb-2">
+            {/* 批次操作控制與已選取記錄加總統計 */}
+            <div className="mb-4 bg-blue-50 border border-blue-200 p-3 rounded-lg space-y-2">
+              <div className="flex justify-between items-center">
                 <span className="text-xs font-bold text-blue-800">已選取 {selectedIds.length} 筆記錄</span>
                 <button onClick={handleSelectAll} className="text-xs text-blue-600 underline font-semibold">
                   {selectedIds.length === currentRecords.length ? '取消本頁全選' : '本頁全選'}
@@ -2159,12 +2244,92 @@ function App() {
               </div>
 
               {selectedIds.length > 0 && (
-                <div className="flex flex-col gap-2 pt-2 border-t border-blue-200">
-                  <div className="flex gap-2">
-                    <button onClick={() => handleBatchReimbursed(true)} className="flex-1 bg-green-600 text-white text-xs py-1.5 rounded font-semibold">設為完成狀態</button>
-                    <button onClick={() => handleBatchReimbursed(false)} className="flex-1 bg-gray-600 text-white text-xs py-1.5 rounded font-semibold">取消狀態</button>
-                    <button onClick={handleBatchDelete} className="bg-red-500 text-white text-xs py-1.5 px-3 rounded font-semibold">刪除</button>
+                <div className="bg-white border border-blue-200 p-2 rounded text-[11px] space-y-0.5 text-blue-900">
+                  <div className="font-bold mb-0.5">📌 已選取記錄加總：</div>
+                  <div className="flex justify-between">
+                    <span>選取收入: <strong className="text-green-600">+${selectedTotalIncome.toFixed(2)}</strong></span>
+                    <span>選取支出: <strong className="text-red-600">-${selectedTotalExpense.toFixed(2)}</strong></span>
+                    <span>選取淨額: <strong className={selectedNetBalance >= 0 ? 'text-green-600' : 'text-red-600'}>${selectedNetBalance.toFixed(2)}</strong></span>
                   </div>
+                </div>
+              )}
+
+              {selectedIds.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-blue-200">
+                  <div className="flex gap-2">
+                    <button 
+                      onClick={() => setIsBatchEditing(!isBatchEditing)} 
+                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-1.5 rounded font-semibold shadow"
+                    >
+                      {isBatchEditing ? '收起批次修改' : '⚙️ 批次修改報銷/入賬資料...'}
+                    </button>
+                    <button onClick={handleBatchDelete} className="bg-red-500 hover:bg-red-600 text-white text-xs py-1.5 px-3 rounded font-semibold">刪除</button>
+                  </div>
+
+                  {isBatchEditing && (
+                    <div className="bg-white p-3 rounded-lg border border-indigo-200 space-y-2.5">
+                      <h3 className="text-xs font-bold text-indigo-900">批次修改所選記錄資料：</h3>
+                      
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="checkbox"
+                          id="batch-is-reimbursed"
+                          checked={batchForm.is_reimbursed}
+                          onChange={(e) => setBatchForm({ ...batchForm, is_reimbursed: e.target.checked })}
+                          className="w-4 h-4 text-blue-600 rounded border"
+                        />
+                        <label htmlFor="batch-is-reimbursed" className="text-xs text-gray-700 font-bold cursor-pointer">
+                          設為完成狀態（已報銷 / 已入賬）
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-0.5">報銷者（預支員工）</label>
+                          <select 
+                            value={batchForm.reimburser}
+                            onChange={(e) => setBatchForm({ ...batchForm, reimburser: e.target.value })}
+                            className="w-full border rounded p-1.5 text-xs bg-white outline-none"
+                          >
+                            <option value="">(維持不變)</option>
+                            {employees.map(emp => (
+                              <option key={emp.id} value={emp.employee_name}>{emp.employee_name}</option>
+                            ))}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] text-gray-500 mb-0.5">方式</label>
+                          <select 
+                            value={batchForm.reimbursement_method}
+                            onChange={(e) => setBatchForm({ ...batchForm, reimbursement_method: e.target.value })}
+                            className="w-full border rounded p-1.5 text-xs bg-white outline-none"
+                          >
+                            <option value="">(維持不變)</option>
+                            {accountMethodOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+                          </select>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] text-gray-500 mb-0.5">備註</label>
+                        <input 
+                          type="text" 
+                          value={batchForm.remark}
+                          onChange={(e) => setBatchForm({ ...batchForm, remark: e.target.value })}
+                          placeholder="輸入新備註（留空則不修改原有備註）" 
+                          className="w-full border rounded p-1.5 text-xs outline-none bg-white"
+                        />
+                      </div>
+
+                      <button 
+                        onClick={handleBatchUpdateSubmit}
+                        disabled={isLoading}
+                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 rounded font-bold shadow"
+                      >
+                        {isLoading ? '更新中...' : '確認執行批次修改'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -2247,7 +2412,10 @@ function App() {
                                 className="w-full border rounded p-1.5 text-xs outline-none"
                               />
                             </div>
-                            <div className="flex items-center gap-1.5 pt-4">
+                          </div>
+
+                          <div className="space-y-2 pt-2 border-t">
+                            <div className="flex items-center gap-1.5">
                               <input 
                                 type="checkbox"
                                 id={`inline-reimbursed-${record.id}`}
@@ -2255,9 +2423,65 @@ function App() {
                                 onChange={(e) => setInlineForm({ ...inlineForm, is_reimbursed: e.target.checked })}
                                 className="w-4 h-4 text-blue-600 rounded border"
                               />
-                              <label htmlFor={`inline-reimbursed-${record.id}`} className="text-xs text-gray-700 cursor-pointer">
-                                {inlineForm.type === 'income' ? '已入賬' : '已報銷'}
+                              <label htmlFor={`inline-reimbursed-${record.id}`} className="text-xs text-gray-700 cursor-pointer font-bold">
+                                {inlineForm.type === 'income' ? '此筆交易已入賬' : '此筆交易已報銷'}
                               </label>
+                            </div>
+
+                            {inlineForm.is_reimbursed && (
+                              <div className="space-y-2 pl-2 border-l-2 border-blue-400">
+                                {inlineForm.type === 'income' ? (
+                                  <div>
+                                    <label className="block text-[10px] text-gray-500 mb-0.5">入賬方式</label>
+                                    <select 
+                                      value={inlineForm.account_method}
+                                      onChange={(e) => setInlineForm({ ...inlineForm, account_method: e.target.value })}
+                                      className="w-full border rounded p-1.5 text-xs bg-white outline-none"
+                                    >
+                                      <option value="">請選擇入賬方式</option>
+                                      {accountMethodOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+                                    </select>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div>
+                                      <label className="block text-[10px] text-gray-500 mb-0.5">報銷者（預支員工）</label>
+                                      <select 
+                                        value={inlineForm.reimburser}
+                                        onChange={(e) => setInlineForm({ ...inlineForm, reimburser: e.target.value })}
+                                        className="w-full border rounded p-1.5 text-xs bg-white outline-none"
+                                      >
+                                        <option value="">請選擇報銷者</option>
+                                        {employees.map(emp => (
+                                          <option key={emp.id} value={emp.employee_name}>{emp.employee_name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block text-[10px] text-gray-500 mb-0.5">報銷方式</label>
+                                      <select 
+                                        value={inlineForm.reimbursement_method}
+                                        onChange={(e) => setInlineForm({ ...inlineForm, reimbursement_method: e.target.value })}
+                                        className="w-full border rounded p-1.5 text-xs bg-white outline-none"
+                                      >
+                                        <option value="">請選擇報銷方式</option>
+                                        {accountMethodOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+                                      </select>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                            )}
+
+                            <div>
+                              <label className="block text-[10px] text-gray-500 mb-0.5">備註</label>
+                              <input 
+                                type="text" 
+                                value={inlineForm.remark}
+                                onChange={(e) => setInlineForm({ ...inlineForm, remark: e.target.value })}
+                                className="w-full border rounded p-1.5 text-xs outline-none"
+                                placeholder="備註（選填）"
+                              />
                             </div>
                           </div>
 
@@ -2286,7 +2510,12 @@ function App() {
                                     {record.type === 'income' ? (record.is_reimbursed ? '已入賬' : '未入賬') : (record.is_reimbursed ? '已報銷' : '未報銷')}
                                   </span>
                                 </div>
-                                <p className="text-xs text-gray-500 mt-1">{record.transaction_date}</p>
+                                <p className="text-xs text-gray-500 mt-1">
+                                  {record.transaction_date}
+                                  {(record.reimburser || record.advance_deduction_employee) && ` | 報銷者: ${record.reimburser || record.advance_deduction_employee}`}
+                                  {(record.reimbursement_method || record.account_method) && ` | 方式: ${record.reimbursement_method || record.account_method}`}
+                                  {record.remark && ` | 備註: ${record.remark}`}
+                                </p>
                               </div>
                             </div>
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
@@ -2309,9 +2538,9 @@ function App() {
 
             {totalPages > 1 && (
               <div className="flex justify-between items-center mb-4 bg-gray-50 p-3 rounded-lg border">
-                <button onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="px-3 py-1.5 bg-white border rounded text-sm font-semibold disabled:opacity-40">← 上一頁</button>
+                <button onClick={() => { setCurrentPage((prev) => Math.max(prev - 1, 1)); setSelectedIds([]); }} disabled={currentPage === 1} className="px-3 py-1.5 bg-white border rounded text-sm font-semibold disabled:opacity-40">← 上一頁</button>
                 <span className="text-sm font-medium text-gray-600">第 {currentPage} 頁 / 共 {totalPages} 頁</span>
-                <button onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border rounded text-sm font-semibold disabled:opacity-40">下一頁 →</button>
+                <button onClick={() => { setCurrentPage((prev) => Math.min(prev + 1, totalPages)); setSelectedIds([]); }} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border rounded text-sm font-semibold disabled:opacity-40">下一頁 →</button>
               </div>
             )}
           </>
