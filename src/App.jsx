@@ -40,6 +40,14 @@ function App() {
   const [selectedPrintDoc, setSelectedPrintDoc] = useState(null)
   const [editingDocId, setEditingDocId] = useState(null)
 
+  // 單據記錄篩選 Filter State
+  const [docFilterType, setDocFilterType] = useState('all')
+  const [docFilterStatus, setDocFilterStatus] = useState('all')
+  const [docFilterCustomerId, setDocFilterCustomerId] = useState('all')
+  const [docFilterSearch, setDocFilterSearch] = useState('')
+  const [docFilterStartDate, setDocFilterStartDate] = useState('')
+  const [docFilterEndDate, setDocFilterEndDate] = useState('')
+
   const [commonItemOptions, setCommonItemOptions] = useState([])
   const [newItemOptionName, setNewItemOptionName] = useState('')
   const [editingItemOptionId, setEditingItemOptionId] = useState(null)
@@ -53,12 +61,34 @@ function App() {
   const [newCustAddress, setNewCustAddress] = useState('')
   const [newCustStatus, setNewCustStatus] = useState('active')
 
+  // 員工檔案建立
   const [newEmpName, setNewEmpName] = useState('')
+  const [newEmpRole, setNewEmpRole] = useState('')
+
+  // 員工檔案（姓名 / 崗位）行內編輯 State
+  const [editingEmpId, setEditingEmpId] = useState(null)
+  const [editingEmpForm, setEditingEmpForm] = useState({ employee_name: '', role: '' })
+
+  // 預支建立
   const [selectedEmpIdForAdvance, setSelectedEmpIdForAdvance] = useState('')
   const [advanceDate, setAdvanceDate] = useState(new Date().toISOString().split('T')[0])
   const [advanceAmt, setAdvanceAmt] = useState('')
   const [advanceMethod, setAdvanceMethod] = useState('銀行轉賬')
   const [advanceRemark, setAdvanceRemark] = useState('')
+
+  // 預支明細紀錄行內編輯 State
+  const [editingAdvanceTxId, setEditingAdvanceTxId] = useState(null)
+  const [editingAdvanceTxForm, setEditingAdvanceTxForm] = useState({
+    employee_id: '',
+    date: '',
+    amount: '',
+    method: '銀行轉賬',
+    remark: ''
+  })
+
+  // 人事及資金管理伸縮 State
+  const [isEmployeesExpanded, setIsEmployeesExpanded] = useState(true)
+  const [isAdvanceHistoryExpanded, setIsAdvanceHistoryExpanded] = useState(false)
 
   const [salaryEmployee, setSalaryEmployee] = useState('')
   const [salaryAmount, setSalaryAmount] = useState('')
@@ -282,20 +312,58 @@ function App() {
 
   const handleAddEmployee = async (e) => {
     e.preventDefault()
-    if (!newEmpName) {
+    if (!newEmpName.trim()) {
       alert('請輸入員工姓名！')
       return
     }
 
     const { error } = await supabase
       .from('advances')
-      .insert([{ employee_name: newEmpName.trim(), initial_amount: 0, balance: 0, status: 'active' }])
+      .insert([{ 
+        employee_name: newEmpName.trim(), 
+        role: newEmpRole.trim() || null,
+        initial_amount: 0, 
+        balance: 0, 
+        status: 'active' 
+      }])
 
     if (error) {
       alert('新增員工失敗（可能已存在）：' + error.message)
     } else {
-      alert(`✅ 成功新增員工：${newEmpName}`)
+      alert(`✅ 成功新增員工：${newEmpName}${newEmpRole ? ` (${newEmpRole})` : ''}`)
       setNewEmpName('')
+      setNewEmpRole('')
+      await fetchData()
+    }
+  }
+
+  const handleStartEditEmployee = (emp) => {
+    setEditingEmpId(emp.id)
+    setEditingEmpForm({
+      employee_name: emp.employee_name || '',
+      role: emp.role || ''
+    })
+  }
+
+  const handleSaveEditEmployee = async (id) => {
+    if (!editingEmpForm.employee_name.trim()) {
+      alert('員工姓名不能為空！')
+      return
+    }
+
+    const { error } = await supabase
+      .from('advances')
+      .update({
+        employee_name: editingEmpForm.employee_name.trim(),
+        role: editingEmpForm.role.trim() || null
+      })
+      .eq('id', id)
+
+    if (error) {
+      alert('更新員工檔案失敗：' + error.message)
+    } else {
+      alert('✅ 員工檔案更新成功！')
+      setEditingEmpId(null)
       await fetchData()
     }
   }
@@ -352,6 +420,50 @@ function App() {
     
     const records = await fetchRecords()
     await fetchData(records)
+  }
+
+  const handleStartEditAdvanceTx = (det) => {
+    setEditingAdvanceTxId(det.id)
+    setEditingAdvanceTxForm({
+      employee_id: det.employee_id || '',
+      date: det.date ? det.date.toString().split('T')[0] : '',
+      amount: det.amount || '',
+      method: det.method || '銀行轉賬',
+      remark: det.remark || ''
+    })
+  }
+
+  const handleSaveEditAdvanceTx = async (id) => {
+    if (!editingAdvanceTxForm.employee_id || !editingAdvanceTxForm.amount) {
+      alert('員工與預支金額不能為空！')
+      return
+    }
+
+    const amt = parseFloat(editingAdvanceTxForm.amount)
+    if (isNaN(amt) || amt <= 0) {
+      alert('請輸入有效的預支金額！')
+      return
+    }
+
+    const { error } = await supabase
+      .from('advance_transactions')
+      .update({
+        employee_id: editingAdvanceTxForm.employee_id,
+        date: editingAdvanceTxForm.date,
+        amount: amt,
+        method: editingAdvanceTxForm.method,
+        remark: editingAdvanceTxForm.remark
+      })
+      .eq('id', id)
+
+    if (error) {
+      alert('更新預支記錄失敗：' + error.message)
+    } else {
+      alert('✅ 預支記錄更新成功！')
+      setEditingAdvanceTxId(null)
+      const records = await fetchRecords()
+      await fetchData(records)
+    }
   }
 
   const handleDeleteAdvanceTransaction = async (det) => {
@@ -516,23 +628,6 @@ function App() {
     }
   }
 
-  const handleBatchReimbursed = async (status) => {
-    if (selectedIds.length === 0) return
-    if (!window.confirm(`確定要將選取的 ${selectedIds.length} 筆記錄更新狀態嗎？`)) return
-
-    for (const id of selectedIds) {
-      const target = allRecords.find(r => r.id === id)
-      if (target) {
-        await supabase.from('transactions').update({ is_reimbursed: status }).eq('id', target.id)
-      }
-    }
-
-    alert('✅ 批次狀態更新完成！')
-    setSelectedIds([])
-    const records = await fetchRecords()
-    await fetchData(records)
-  }
-
   const handleBatchUpdateSubmit = async () => {
     if (selectedIds.length === 0) return
     if (!window.confirm(`確定要將選取的 ${selectedIds.length} 筆記錄進行批次修改嗎？`)) return
@@ -623,9 +718,9 @@ function App() {
         item_name: inlineForm.item_name,
         type: inlineForm.type,
         is_reimbursed: inlineForm.is_reimbursed,
-        account_method: inlineForm.account_method || null,
-        reimburser: inlineForm.reimburser || null,
-        reimbursement_method: inlineForm.reimbursement_method || null,
+        account_method: inlineForm.type === 'income' && inlineForm.is_reimbursed ? inlineForm.account_method : null,
+        reimburser: inlineForm.type === 'expense' && inlineForm.is_reimbursed ? inlineForm.reimburser : null,
+        reimbursement_method: inlineForm.type === 'expense' && inlineForm.is_reimbursed ? inlineForm.reimbursement_method : null,
         remark: inlineForm.remark,
         transaction_date: inlineForm.transaction_date
       }
@@ -963,6 +1058,31 @@ function App() {
     }
   }
 
+  // 報價單與發票篩選過濾邏輯
+  const filteredDocuments = documents.filter(doc => {
+    const matchType = docFilterType === 'all' || doc.type === docFilterType
+    const matchStatus = docFilterStatus === 'all' || doc.status === docFilterStatus
+    const matchCustomer = docFilterCustomerId === 'all' || doc.customer_id === docFilterCustomerId
+
+    const searchLower = docFilterSearch.toLowerCase()
+    const matchSearch = !docFilterSearch || 
+      (doc.doc_number && doc.doc_number.toLowerCase().includes(searchLower)) ||
+      (doc.issued_by && doc.issued_by.toLowerCase().includes(searchLower)) ||
+      (doc.remark && doc.remark.toLowerCase().includes(searchLower))
+
+    let matchDate = true
+    if (docFilterStartDate && doc.issue_date < docFilterStartDate) {
+      matchDate = false
+    }
+    if (docFilterEndDate && doc.issue_date > docFilterEndDate) {
+      matchDate = false
+    }
+
+    return matchType && matchStatus && matchCustomer && matchSearch && matchDate
+  })
+
+  const filteredDocsTotalAmount = filteredDocuments.reduce((sum, d) => sum + Number(d.total_amount || 0), 0)
+
   const filteredRecords = allRecords.filter(record => {
     const matchCategory = selectedCategories.length === 0 || (record.category && selectedCategories.includes(record.category))
     const matchType = selectedTypeFilter === 'all' || record.type === selectedTypeFilter
@@ -1184,34 +1304,31 @@ function App() {
               >
                 + 建立單據
               </button>
-              <button 
-                onClick={() => {
-                  setEditingCustId(null)
-                  setNewCustName('')
-                  setNewCustContact('')
-                  setNewCustEmail('')
-                  setNewCustPhone('')
-                  setNewCustAddress('')
-                  setNewCustStatus('active')
-                  setView('customers')
-                }}
-                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors ${view === 'customers' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-              >
-                客戶管理
-              </button>
             </div>
 
             <div className="flex items-center gap-2">
               <select
-                value={view === 'salary' || view === 'advances' || view === 'itemOptions' ? view : ''}
+                value={view === 'salary' || view === 'advances' || view === 'itemOptions' || view === 'customers' ? view : ''}
                 onChange={(e) => {
-                  if (e.target.value) setView(e.target.value)
+                  if (e.target.value) {
+                    if (e.target.value === 'customers') {
+                      setEditingCustId(null)
+                      setNewCustName('')
+                      setNewCustContact('')
+                      setNewCustEmail('')
+                      setNewCustPhone('')
+                      setNewCustAddress('')
+                      setNewCustStatus('active')
+                    }
+                    setView(e.target.value)
+                  }
                 }}
                 className="bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-bold outline-none cursor-pointer hover:bg-indigo-100 transition-colors"
               >
                 <option value="" disabled>⚙️ 其他管理...</option>
+                <option value="customers">👥 客戶管理</option>
                 <option value="salary">💰 支付薪金</option>
-                <option value="advances">👥 預支管理</option>
+                <option value="advances">👤 人事及資金管理</option>
                 <option value="itemOptions">📋 項目說明管理</option>
               </select>
             </div>
@@ -1244,7 +1361,7 @@ function App() {
                 <select value={salaryEmployee} onChange={(e) => setSalaryEmployee(e.target.value)} className="w-full border rounded p-2 text-sm bg-white outline-none">
                   <option value="">請選擇員工</option>
                   {activeEmployees.map(emp => (
-                    <option key={emp.id} value={emp.employee_name}>{emp.employee_name}</option>
+                    <option key={emp.id} value={emp.employee_name}>{emp.employee_name} {emp.role ? `(${emp.role})` : ''}</option>
                   ))}
                 </select>
               </div>
@@ -1283,31 +1400,40 @@ function App() {
             </form>
           </>
         ) : view === 'advances' ? (
-          // ================= 員工預支資金管理面板 =================
+          // ================= 人事及資金管理面板 =================
           <>
             <div className="flex justify-between items-center mb-4">
-              <h1 className="text-xl font-bold text-gray-800">員工預支資金管理</h1>
+              <h1 className="text-xl font-bold text-gray-800">人事及資金管理</h1>
               <button onClick={() => setView('home')} className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200">
                 ← 返回主畫面
               </button>
             </div>
 
+            {/* 新增員工檔案表單 */}
             <form onSubmit={handleAddEmployee} className="bg-gray-50 p-3 rounded-lg border mb-4 space-y-2">
               <h2 className="text-xs font-bold text-gray-800">新增員工檔案</h2>
-              <div className="flex gap-2">
-                <input type="text" value={newEmpName} onChange={(e) => setNewEmpName(e.target.value)} className="flex-1 border rounded p-1.5 text-xs outline-none bg-white" placeholder="請輸入員工姓名" />
-                <button type="submit" className="bg-gray-800 hover:bg-gray-900 text-white text-xs px-3 py-1.5 rounded font-bold">新增員工</button>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">員工姓名 *</label>
+                  <input type="text" value={newEmpName} onChange={(e) => setNewEmpName(e.target.value)} className="w-full border rounded p-1.5 text-xs outline-none bg-white" placeholder="姓名" required />
+                </div>
+                <div>
+                  <label className="block text-[10px] text-gray-600 mb-0.5">崗位 / 職位</label>
+                  <input type="text" value={newEmpRole} onChange={(e) => setNewEmpRole(e.target.value)} className="w-full border rounded p-1.5 text-xs outline-none bg-white" placeholder="如：攝影師、助理" />
+                </div>
               </div>
+              <button type="submit" className="w-full bg-gray-800 hover:bg-gray-900 text-white text-xs py-1.5 rounded font-bold shadow">新增員工</button>
             </form>
 
+            {/* 新增預支資金記錄表單（「日期」輸入框已精確限制寬度） */}
             <form onSubmit={handleAddAdvanceTransaction} className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 mb-6 space-y-2.5">
               <h2 className="text-xs font-bold text-indigo-900">新增預支資金記錄</h2>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 items-center">
                 <div>
                   <label className="block text-[10px] text-gray-600 mb-0.5">選擇員工</label>
                   <select value={selectedEmpIdForAdvance} onChange={(e) => setSelectedEmpIdForAdvance(e.target.value)} className="w-full border rounded p-1.5 text-xs bg-white outline-none">
                     <option value="">請選擇員工</option>
-                    {employees.map(emp => (<option key={emp.id} value={emp.id}>{emp.employee_name} ({emp.status === 'active' ? '正常' : '已離職/停用'})</option>))}
+                    {employees.map(emp => (<option key={emp.id} value={emp.id}>{emp.employee_name} {emp.role ? `[${emp.role}]` : ''} ({emp.status === 'active' ? '正常' : '已離職/停用'})</option>))}
                   </select>
                 </div>
                 <div>
@@ -1316,7 +1442,7 @@ function App() {
                     type="date" 
                     value={advanceDate} 
                     onChange={(e) => setAdvanceDate(e.target.value)} 
-                    className="w-full max-w-[220px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
+                    className="w-full max-w-[160px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
                   />
                 </div>
               </div>
@@ -1342,55 +1468,201 @@ function App() {
               <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 rounded font-bold shadow">記錄預支資金</button>
             </form>
 
-            <h2 className="text-sm font-bold text-gray-800 mb-2">員工狀態與預支餘額</h2>
-            <div className="space-y-2 mb-6">
-              {employees.length === 0 ? (
-                <p className="text-gray-500 text-center text-xs py-2">尚無員工檔案</p>
-              ) : (
-                employees.map(emp => (
-                  <div key={emp.id} className="bg-gray-50 p-2.5 rounded border flex justify-between items-center text-xs">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-bold text-gray-800">{emp.employee_name}</span>
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${emp.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
-                          {emp.status === 'active' ? '正常' : '已離職/停用'}
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-gray-500 mt-0.5">累計預支：${emp.initial_amount.toFixed(2)} | 剩餘餘額：<strong className="text-indigo-600">${emp.balance.toFixed(2)}</strong></p>
-                    </div>
+            {/* 員工狀態與預支餘額（伸縮式顯示） */}
+            <div className="mb-4 border rounded-lg bg-white overflow-hidden shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsEmployeesExpanded(!isEmployeesExpanded)}
+                className="w-full flex justify-between items-center px-3 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors text-left border-b font-bold text-gray-800 text-xs"
+              >
+                <span>👥 員工狀態與預支餘額 ({employees.length} 位)</span>
+                <span className="text-gray-500 text-[11px] font-semibold">{isEmployeesExpanded ? '▲ 收起' : '▼ 展開'}</span>
+              </button>
 
-                    <div className="flex gap-1">
-                      {emp.status === 'active' ? (
-                        <>
-                          <button onClick={() => handleMarkResigned(emp)} className="bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11px] font-semibold px-2 py-1 rounded">設為離職</button>
-                          <button onClick={() => handleDeleteEmployee(emp)} className="bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold px-2 py-1 rounded">刪除</button>
-                        </>
-                      ) : (
-                        <button onClick={() => handleRestoreEmployee(emp)} className="bg-green-50 hover:bg-green-100 text-green-600 text-[11px] font-semibold px-2 py-1 rounded">恢復正常</button>
-                      )}
-                    </div>
-                  </div>
-                ))
+              {isEmployeesExpanded && (
+                <div className="p-2.5 space-y-2">
+                  {employees.length === 0 ? (
+                    <p className="text-gray-500 text-center text-xs py-2">尚無員工檔案</p>
+                  ) : (
+                    employees.map(emp => {
+                      const isEditingThisEmp = editingEmpId === emp.id
+
+                      return (
+                        <div key={emp.id} className="bg-gray-50 p-2.5 rounded border text-xs">
+                          {isEditingThisEmp ? (
+                            <div className="space-y-2 bg-white p-2 rounded border border-amber-300">
+                              <p className="font-bold text-amber-800 text-[11px]">✏️ 編輯員工檔案</p>
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="block text-[10px] text-gray-500 mb-0.5">員工姓名</label>
+                                  <input 
+                                    type="text" 
+                                    value={editingEmpForm.employee_name} 
+                                    onChange={(e) => setEditingEmpForm({ ...editingEmpForm, employee_name: e.target.value })}
+                                    className="w-full border rounded p-1 text-xs outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-gray-500 mb-0.5">崗位 / 職位</label>
+                                  <input 
+                                    type="text" 
+                                    value={editingEmpForm.role} 
+                                    onChange={(e) => setEditingEmpForm({ ...editingEmpForm, role: e.target.value })}
+                                    placeholder="如：攝影師、助理"
+                                    className="w-full border rounded p-1 text-xs outline-none"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex gap-1 justify-end pt-1">
+                                <button onClick={() => handleSaveEditEmployee(emp.id)} className="bg-green-600 text-white px-2.5 py-1 rounded font-bold">儲存</button>
+                                <button onClick={() => setEditingEmpId(null)} className="bg-gray-200 text-gray-700 px-2.5 py-1 rounded font-semibold">取消</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-bold text-gray-800 text-sm">{emp.employee_name}</span>
+                                  {emp.role && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-50 text-blue-700 border border-blue-200">
+                                      {emp.role}
+                                    </span>
+                                  )}
+                                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${emp.status === 'active' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                    {emp.status === 'active' ? '正常' : '已離職/停用'}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-gray-500 mt-1">累計預支：${emp.initial_amount.toFixed(2)} | 剩餘餘額：<strong className="text-indigo-600">${emp.balance.toFixed(2)}</strong></p>
+                              </div>
+
+                              <div className="flex gap-1 items-center">
+                                <button onClick={() => handleStartEditEmployee(emp)} className="bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11px] font-semibold px-2 py-1 rounded">編輯 ✏️</button>
+                                {emp.status === 'active' ? (
+                                  <>
+                                    <button onClick={() => handleMarkResigned(emp)} className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-[11px] font-semibold px-2 py-1 rounded">設為離職</button>
+                                    <button onClick={() => handleDeleteEmployee(emp)} className="bg-red-50 hover:bg-red-100 text-red-600 text-[11px] font-semibold px-2 py-1 rounded">刪除</button>
+                                  </>
+                                ) : (
+                                  <button onClick={() => handleRestoreEmployee(emp)} className="bg-green-50 hover:bg-green-100 text-green-600 text-[11px] font-semibold px-2 py-1 rounded">恢復正常</button>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
               )}
             </div>
 
-            <h2 className="text-sm font-bold text-gray-800 mb-2">預支資金歷史明細記錄</h2>
-            <div className="space-y-2">
-              {advanceDetails.length === 0 ? (
-                <p className="text-gray-500 text-center text-xs py-2">尚無預支明細</p>
-              ) : (
-                advanceDetails.map(det => {
-                  const emp = employees.find(e => e.id === det.employee_id)
-                  return (
-                    <div key={det.id} className="bg-gray-50 p-2.5 rounded border flex justify-between items-center text-xs">
-                      <div>
-                        <p className="font-semibold text-gray-800">{emp ? emp.employee_name : '未知員工'} - <span className="text-indigo-600 font-bold">${det.amount.toFixed(2)}</span> ({det.method})</p>
-                        <p className="text-[10px] text-gray-500">{det.date} {det.remark ? `| 備註：${det.remark}` : ''}</p>
-                      </div>
-                      <button onClick={() => handleDeleteAdvanceTransaction(det)} className="text-red-500 hover:text-red-700 text-[11px] font-semibold bg-red-50 px-2 py-1 rounded">刪除</button>
-                    </div>
-                  )
-                })
+            {/* 預支資金歷史明細記錄（伸縮式顯示） */}
+            <div className="mb-4 border rounded-lg bg-white overflow-hidden shadow-sm">
+              <button
+                type="button"
+                onClick={() => setIsAdvanceHistoryExpanded(!isAdvanceHistoryExpanded)}
+                className="w-full flex justify-between items-center px-3 py-2.5 bg-gray-50 hover:bg-gray-100 transition-colors text-left border-b font-bold text-gray-800 text-xs"
+              >
+                <span>📜 預支資金歷史明細記錄 ({advanceDetails.length} 筆)</span>
+                <span className="text-gray-500 text-[11px] font-semibold">{isAdvanceHistoryExpanded ? '▲ 收起' : '▼ 展開'}</span>
+              </button>
+
+              {isAdvanceHistoryExpanded && (
+                <div className="p-2.5 space-y-2">
+                  {advanceDetails.length === 0 ? (
+                    <p className="text-gray-500 text-center text-xs py-2">尚無預支明細</p>
+                  ) : (
+                    advanceDetails.map(det => {
+                      const emp = employees.find(e => e.id === det.employee_id)
+                      const isEditingThisTx = editingAdvanceTxId === det.id
+
+                      return (
+                        <div key={det.id} className="bg-gray-50 p-2.5 rounded border text-xs">
+                          {isEditingThisTx ? (
+                            <div className="space-y-2 bg-white p-2 rounded border border-indigo-300">
+                              <p className="font-bold text-indigo-900 text-[11px]">✏️ 編輯預支明細記錄</p>
+                              
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="block text-[10px] text-gray-500 mb-0.5">員工</label>
+                                  <select 
+                                    value={editingAdvanceTxForm.employee_id} 
+                                    onChange={(e) => setEditingAdvanceTxForm({ ...editingAdvanceTxForm, employee_id: e.target.value })}
+                                    className="w-full border rounded p-1 text-xs bg-white outline-none"
+                                  >
+                                    {employees.map(e => (
+                                      <option key={e.id} value={e.id}>{e.employee_name} {e.role ? `[${e.role}]` : ''}</option>
+                                    ))}
+                                  </select>
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-gray-500 mb-0.5">日期</label>
+                                  <input 
+                                    type="date" 
+                                    value={editingAdvanceTxForm.date} 
+                                    onChange={(e) => setEditingAdvanceTxForm({ ...editingAdvanceTxForm, date: e.target.value })}
+                                    className="w-full max-w-[160px] box-border min-w-0 block border rounded p-1 text-xs outline-none bg-white [color-scheme:light]"
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="block text-[10px] text-gray-500 mb-0.5">預支金額 (HKD)</label>
+                                  <input 
+                                    type="number" 
+                                    value={editingAdvanceTxForm.amount} 
+                                    onChange={(e) => setEditingAdvanceTxForm({ ...editingAdvanceTxForm, amount: e.target.value })}
+                                    className="w-full border rounded p-1 text-xs outline-none"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-[10px] text-gray-500 mb-0.5">方式</label>
+                                  <select 
+                                    value={editingAdvanceTxForm.method} 
+                                    onChange={(e) => setEditingAdvanceTxForm({ ...editingAdvanceTxForm, method: e.target.value })}
+                                    className="w-full border rounded p-1 text-xs bg-white outline-none"
+                                  >
+                                    {accountMethodOptions.map(m => (<option key={m} value={m}>{m}</option>))}
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-[10px] text-gray-500 mb-0.5">備註</label>
+                                <input 
+                                  type="text" 
+                                  value={editingAdvanceTxForm.remark} 
+                                  onChange={(e) => setEditingAdvanceTxForm({ ...editingAdvanceTxForm, remark: e.target.value })}
+                                  className="w-full border rounded p-1 text-xs outline-none"
+                                  placeholder="備註說明（選填）"
+                                />
+                              </div>
+
+                              <div className="flex gap-1 justify-end pt-1">
+                                <button onClick={() => handleSaveEditAdvanceTx(det.id)} className="bg-indigo-600 text-white px-2.5 py-1 rounded font-bold">儲存</button>
+                                <button onClick={() => setEditingAdvanceTxId(null)} className="bg-gray-200 text-gray-700 px-2.5 py-1 rounded font-semibold">取消</button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <p className="font-semibold text-gray-800">
+                                  {emp ? emp.employee_name : '未知員工'} {emp?.role ? `(${emp.role})` : ''} - <span className="text-indigo-600 font-bold">${det.amount.toFixed(2)}</span> ({det.method})
+                                </p>
+                                <p className="text-[10px] text-gray-500">{det.date} {det.remark ? `| 備註：${det.remark}` : ''}</p>
+                              </div>
+                              <div className="flex gap-1">
+                                <button onClick={() => handleStartEditAdvanceTx(det)} className="text-amber-700 hover:text-amber-800 text-[11px] font-semibold bg-amber-50 px-2 py-1 rounded">編輯 ✏️</button>
+                                <button onClick={() => handleDeleteAdvanceTransaction(det)} className="text-red-500 hover:text-red-700 text-[11px] font-semibold bg-red-50 px-2 py-1 rounded">刪除 🗑️</button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
               )}
             </div>
           </>
@@ -1464,7 +1736,7 @@ function App() {
             </div>
           </>
         ) : view === 'documents' ? (
-          // ================= 單據記錄列表 =================
+          // ================= 報價單與發票記錄（具備 Filter 篩選功能） =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">報價單與發票記錄</h1>
@@ -1472,11 +1744,113 @@ function App() {
                 ← 返回主畫面
               </button>
             </div>
+
+            {/* 單據 Filter 控制列 */}
+            <div className="mb-4 space-y-2.5 bg-gray-50 p-3 rounded-lg border border-gray-200 text-xs">
+              <div className="flex items-center justify-between">
+                <label className="font-medium text-gray-700">單據類型：</label>
+                <select
+                  value={docFilterType}
+                  onChange={(e) => setDocFilterType(e.target.value)}
+                  className="border rounded p-1.5 bg-white outline-none w-48 text-gray-700"
+                >
+                  <option value="all">全部類型</option>
+                  <option value="quotation">報價單 (Quotation)</option>
+                  <option value="invoice">發票 (Invoice)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between pt-1.5 border-t border-gray-200">
+                <label className="font-medium text-gray-700">單據狀態：</label>
+                <select
+                  value={docFilterStatus}
+                  onChange={(e) => setDocFilterStatus(e.target.value)}
+                  className="border rounded p-1.5 bg-white outline-none w-48 text-gray-700"
+                >
+                  <option value="all">全部狀態</option>
+                  <option value="draft">草稿 (Draft)</option>
+                  <option value="sent">已發送 (Sent)</option>
+                  <option value="paid">已付款 (Paid)</option>
+                  <option value="accepted">已接受 (Accepted)</option>
+                  <option value="cancelled">已取消 (Cancelled)</option>
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between pt-1.5 border-t border-gray-200">
+                <label className="font-medium text-gray-700">指定客戶：</label>
+                <select
+                  value={docFilterCustomerId}
+                  onChange={(e) => setDocFilterCustomerId(e.target.value)}
+                  className="border rounded p-1.5 bg-white outline-none w-48 text-gray-700"
+                >
+                  <option value="all">全部客戶</option>
+                  {customers.map(c => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between pt-1.5 border-t border-gray-200">
+                <label className="font-medium text-gray-700">關鍵字搜尋：</label>
+                <input
+                  type="text"
+                  value={docFilterSearch}
+                  onChange={(e) => setDocFilterSearch(e.target.value)}
+                  placeholder="單號 / 發出人 / 備註..."
+                  className="border rounded p-1.5 bg-white outline-none w-48 text-gray-700"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-1.5 border-t border-gray-200">
+                <label className="font-medium text-gray-700">開立日期自：</label>
+                <input
+                  type="date"
+                  value={docFilterStartDate}
+                  onChange={(e) => setDocFilterStartDate(e.target.value)}
+                  className="border rounded p-1.5 bg-white outline-none w-48 max-w-[55%] text-gray-700 [color-scheme:light]"
+                />
+              </div>
+
+              <div className="flex items-center justify-between pt-1.5 border-t border-gray-200">
+                <label className="font-medium text-gray-700">開立日期至：</label>
+                <input
+                  type="date"
+                  value={docFilterEndDate}
+                  onChange={(e) => setDocFilterEndDate(e.target.value)}
+                  className="border rounded p-1.5 bg-white outline-none w-48 max-w-[55%] text-gray-700 [color-scheme:light]"
+                />
+              </div>
+
+              {(docFilterType !== 'all' || docFilterStatus !== 'all' || docFilterCustomerId !== 'all' || docFilterSearch || docFilterStartDate || docFilterEndDate) && (
+                <div className="flex justify-end pt-1">
+                  <button
+                    onClick={() => {
+                      setDocFilterType('all')
+                      setDocFilterStatus('all')
+                      setDocFilterCustomerId('all')
+                      setDocFilterSearch('')
+                      setDocFilterStartDate('')
+                      setDocFilterEndDate('')
+                    }}
+                    className="text-blue-600 underline text-[11px] font-semibold"
+                  >
+                    重置所有篩選
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 篩選結果加總資訊列 */}
+            <div className="mb-4 bg-blue-50 border border-blue-200 p-2.5 rounded-lg text-xs flex justify-between items-center">
+              <span className="text-blue-900 font-bold">符合篩選：{filteredDocuments.length} 張單據</span>
+              <span className="text-blue-900">總金額：<strong className="text-emerald-600 text-sm font-bold">${filteredDocsTotalAmount.toFixed(2)}</strong></span>
+            </div>
+
             <div className="space-y-3">
-              {documents.length === 0 ? (
-                <p className="text-gray-500 text-center text-sm py-6">尚無單據記錄</p>
+              {filteredDocuments.length === 0 ? (
+                <p className="text-gray-500 text-center text-sm py-6">找不到符合條件的單據記錄</p>
               ) : (
-                documents.map(doc => (
+                filteredDocuments.map(doc => (
                   <div key={doc.id} className="bg-gray-50 p-3 rounded-lg border flex flex-col gap-2">
                     <div className="flex justify-between items-center">
                       <div>
@@ -1543,7 +1917,7 @@ function App() {
             </div>
           </>
         ) : view === 'createDoc' ? (
-          // ================= 建立 / 編輯單據表單（日期輸入框寬度縮短至合適尺寸） =================
+          // ================= 建立 / 編輯單據表單 =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">{editingDocId ? '編輯單據' : '建立新單據'}</h1>
@@ -1581,7 +1955,6 @@ function App() {
                 </select>
               </div>
 
-              {/* 開立日期：設定 max-w-[220px] 縮短寬度，避免拉伸過長 */}
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">開立日期</label>
                 <input 
@@ -1600,7 +1973,6 @@ function App() {
                 />
               </div>
 
-              {/* 到期日：在開立日期正下方，僅報價單顯示，寬度同樣縮短為 max-w-[220px] */}
               {docType === 'quotation' && (
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">到期日</label>
@@ -1846,13 +2218,13 @@ function App() {
               <div className="flex gap-3">
                 <button 
                   onClick={() => { setType('income'); setCategory(''); }}
-                  className={`flex-1 py-3 rounded-lg font-bold transition-colors ${type === 'income' ? 'bg-green-500 text-white shadow' : 'bg-gray-100 text-gray-500'}`}
+                  className={`flex-1 py-3 rounded-lg font-bold transition-colors ${type === 'income' ? 'bg-green-500 text-white shadow' : 'bg-gray-100 text-gray-700'}`}
                 >
                   入數 (收入)
                 </button>
                 <button 
                   onClick={() => { setType('expense'); setCategory(''); }}
-                  className={`flex-1 py-3 rounded-lg font-bold transition-colors ${type === 'expense' ? 'bg-red-500 text-white shadow' : 'bg-gray-100 text-gray-500'}`}
+                  className={`flex-1 py-3 rounded-lg font-bold transition-colors ${type === 'expense' ? 'bg-red-500 text-white shadow' : 'bg-gray-100 text-gray-700'}`}
                 >
                   出數 (支出)
                 </button>
@@ -1985,7 +2357,7 @@ function App() {
                           <option value="">請選擇報銷者</option>
                           {employees.map(emp => (
                             <option key={emp.id} value={emp.employee_name}>
-                              {emp.employee_name} {emp.status === 'active' ? `(預支餘額: $${emp.balance.toFixed(2)})` : '(已離職/停用)'}
+                              {emp.employee_name} {emp.role ? `[${emp.role}]` : ''} {emp.status === 'active' ? `(預支餘額: $${emp.balance.toFixed(2)})` : '(已離職/停用)'}
                             </option>
                           ))}
                         </select>
@@ -2086,15 +2458,16 @@ function App() {
         ) : (
           // ================= 全部歷史記錄頁面 =================
           <>
-            <div className="flex justify-between items-center mb-6">
-              <button 
-                onClick={() => { setSelectedIds([]); setIsBatchEditing(false); setInlineEditingId(null); setView('home'); }}
-                className="bg-gray-100 text-gray-700 px-3 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200"
-              >
-                ← 返回主畫面新增
-              </button>
-              <h1 className="text-xl font-bold text-gray-800">全部歷史記錄</h1>
-              <div className="w-16"></div>
+            <div className="flex flex-col gap-2 mb-6">
+              <div>
+                <button 
+                  onClick={() => { setSelectedIds([]); setIsBatchEditing(false); setInlineEditingId(null); setView('home'); }}
+                  className="bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg text-xs font-semibold hover:bg-gray-200"
+                >
+                  ← 返回主畫面新增
+                </button>
+              </div>
+              <h1 className="text-xl font-bold text-gray-800 text-center">全部歷史記錄</h1>
             </div>
 
             {/* 篩選控制列 */}
@@ -2313,7 +2686,7 @@ function App() {
                           >
                             <option value="">(維持不變)</option>
                             {employees.map(emp => (
-                              <option key={emp.id} value={emp.employee_name}>{emp.employee_name}</option>
+                              <option key={emp.id} value={emp.employee_name}>{emp.employee_name} {emp.role ? `[${emp.role}]` : ''}</option>
                             ))}
                           </select>
                         </div>
@@ -2473,7 +2846,7 @@ function App() {
                                       >
                                         <option value="">請選擇報銷者</option>
                                         {employees.map(emp => (
-                                          <option key={emp.id} value={emp.employee_name}>{emp.employee_name}</option>
+                                          <option key={emp.id} value={emp.employee_name}>{emp.employee_name} {emp.role ? `[${emp.role}]` : ''}</option>
                                         ))}
                                       </select>
                                     </div>
