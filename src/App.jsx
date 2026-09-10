@@ -1442,7 +1442,7 @@ function App() {
                     type="date" 
                     value={advanceDate} 
                     onChange={(e) => setAdvanceDate(e.target.value)} 
-                    className="w-full max-w-[160px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
+                    className="w-full max-w-[100px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
                   />
                 </div>
               </div>
