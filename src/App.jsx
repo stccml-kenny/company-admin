@@ -1533,7 +1533,7 @@ function App() {
             </div>
           </>
         ) : view === 'createDoc' ? (
-          // ================= 建立 / 編輯單據表單（排版與寬度與單據類型/單號完全對齊） =================
+          // ================= 建立 / 編輯單據表單（開立日期獨立一行，到期日在正下方且僅報價單時顯示） =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">{editingDocId ? '編輯單據' : '建立新單據'}</h1>
@@ -1542,7 +1542,6 @@ function App() {
               </button>
             </div>
             <form onSubmit={handleSaveDocument} className="bg-gray-50 p-4 rounded-lg border space-y-3">
-              {/* 第一組：單據類型 與 單號 */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">單據類型</label>
@@ -1572,44 +1571,37 @@ function App() {
                 </select>
               </div>
 
-              {/* 第二組：開立日期 與 到期日（完全與第一組網格對齊） */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-gray-700 mb-1">開立日期</label>
-                  <input 
-                    type="date" 
-                    value={issueDate} 
-                    onChange={async (e) => {
-                      const d = e.target.value
-                      setIssueDate(d)
-                      if (!editingDocId) {
-                        const newNum = await generateDocNumber(docType, d, documents)
-                        setDocNumber(newNum)
-                      }
-                    }} 
-                    required 
-                    className="w-full min-w-0 border rounded p-2 text-xs bg-white outline-none" 
-                  />
-                </div>
+              {/* 開立日期：獨立整行顯示 */}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">開立日期</label>
+                <input 
+                  type="date" 
+                  value={issueDate} 
+                  onChange={async (e) => {
+                    const d = e.target.value
+                    setIssueDate(d)
+                    if (!editingDocId) {
+                      const newNum = await generateDocNumber(docType, d, documents)
+                      setDocNumber(newNum)
+                    }
+                  }} 
+                  required 
+                  className="w-full border rounded p-2 text-xs bg-white outline-none" 
+                />
+              </div>
+
+              {/* 到期日：放在開立日期正下方，僅報價單時顯示 */}
+              {docType === 'quotation' && (
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">到期日</label>
-                  {docType === 'quotation' ? (
-                    <input 
-                      type="date" 
-                      value={dueDate} 
-                      onChange={(e) => setDueDate(e.target.value)} 
-                      className="w-full min-w-0 border rounded p-2 text-xs bg-white outline-none" 
-                    />
-                  ) : (
-                    <input 
-                      type="text" 
-                      value="不適用" 
-                      disabled 
-                      className="w-full min-w-0 border rounded p-2 text-xs bg-gray-100 text-gray-400 outline-none cursor-not-allowed" 
-                    />
-                  )}
+                  <input 
+                    type="date" 
+                    value={dueDate} 
+                    onChange={(e) => setDueDate(e.target.value)} 
+                    className="w-full border rounded p-2 text-xs bg-white outline-none" 
+                  />
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">發出人 (Issued By)</label>
