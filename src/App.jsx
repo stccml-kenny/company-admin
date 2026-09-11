@@ -776,7 +776,8 @@ function App() {
       if (updateError) throw updateError
 
       alert('✅ 收據上傳成功！')
-      fetchRecords()
+      const records = await fetchRecords()
+      await fetchData(records)
     } catch (error) {
       alert('❌ 上傳收據失敗：' + error.message)
     } finally {
@@ -1408,7 +1409,6 @@ function App() {
               </button>
             </div>
 
-            {/* 新增員工檔案表單 */}
             <form onSubmit={handleAddEmployee} className="bg-gray-50 p-3 rounded-lg border mb-4 space-y-2">
               <h2 className="text-xs font-bold text-gray-800">新增員工檔案</h2>
               <div className="grid grid-cols-2 gap-2">
@@ -1424,6 +1424,7 @@ function App() {
               <button type="submit" className="w-full bg-gray-800 hover:bg-gray-900 text-white text-xs py-1.5 rounded font-bold shadow">新增員工</button>
             </form>
 
+            {/* 新增預支資金記錄表單（「日期」輸入框尺寸已嚴格限制為 max-w-[110px]） */}
             <form onSubmit={handleAddAdvanceTransaction} className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 mb-6 space-y-2.5">
               <h2 className="text-xs font-bold text-indigo-900">新增預支資金記錄</h2>
               <div className="grid grid-cols-2 gap-2 items-center">
@@ -1440,7 +1441,7 @@ function App() {
                     type="date" 
                     value={advanceDate} 
                     onChange={(e) => setAdvanceDate(e.target.value)} 
-                    className="w-full max-w-[160px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
+                    className="w-full max-w-[110px] box-border min-w-0 block border rounded p-1.5 text-xs outline-none bg-white [color-scheme:light]" 
                   />
                 </div>
               </div>
@@ -1466,7 +1467,6 @@ function App() {
               <button type="submit" className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-2 rounded font-bold shadow">記錄預支資金</button>
             </form>
 
-            {/* 員工狀態與預支餘額（剩餘餘額已移至累計預支正下方換行顯示） */}
             <div className="mb-4 border rounded-lg bg-white overflow-hidden shadow-sm">
               <button
                 type="button"
@@ -1555,7 +1555,6 @@ function App() {
               )}
             </div>
 
-            {/* 預支資金歷史明細記錄（伸縮式顯示） */}
             <div className="mb-4 border rounded-lg bg-white overflow-hidden shadow-sm">
               <button
                 type="button"
@@ -1600,7 +1599,7 @@ function App() {
                                     type="date" 
                                     value={editingAdvanceTxForm.date} 
                                     onChange={(e) => setEditingAdvanceTxForm({ ...editingAdvanceTxForm, date: e.target.value })}
-                                    className="w-full max-w-[160px] box-border min-w-0 block border rounded p-1 text-xs outline-none bg-white [color-scheme:light]"
+                                    className="w-full max-w-[110px] box-border min-w-0 block border rounded p-1 text-xs outline-none bg-white [color-scheme:light]"
                                   />
                                 </div>
                               </div>
@@ -2217,13 +2216,13 @@ function App() {
               <div className="flex gap-3">
                 <button 
                   onClick={() => { setType('income'); setCategory(''); }}
-                  className={`flex-1 py-3 rounded-lg font-bold transition-colors ${type === 'income' ? 'bg-green-500 text-white shadow' : 'bg-gray-100 text-gray-700'}`}
+                  className={`flex-1 py-3 rounded-lg font-bold transition-colors ${type === 'income' ? 'bg-green-500 text-white shadow' : 'bg-gray-100 text-gray-500'}`}
                 >
                   入數 (收入)
                 </button>
                 <button 
                   onClick={() => { setType('expense'); setCategory(''); }}
-                  className={`flex-1 py-3 rounded-lg font-bold transition-colors ${type === 'expense' ? 'bg-red-500 text-white shadow' : 'bg-gray-100 text-gray-700'}`}
+                  className={`flex-1 py-3 rounded-lg font-bold transition-colors ${type === 'expense' ? 'bg-red-500 text-white shadow' : 'bg-gray-100 text-gray-500'}`}
                 >
                   出數 (支出)
                 </button>
@@ -2908,6 +2907,32 @@ function App() {
                                   {(record.reimbursement_method || record.account_method) && ` | 方式: ${record.reimbursement_method || record.account_method}`}
                                   {record.remark && ` | 備註: ${record.remark}`}
                                 </p>
+                                
+                                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                                  {record.receipt_url ? (
+                                    <a 
+                                      href={record.receipt_url} 
+                                      target="_blank" 
+                                      rel="noopener noreferrer"
+                                      className="text-xs text-blue-600 hover:underline font-semibold flex items-center gap-1 bg-blue-50 px-2 py-0.5 rounded border border-blue-200"
+                                    >
+                                      📷 查看收據
+                                    </a>
+                                  ) : (
+                                    <span className="text-[11px] text-gray-400">無收據</span>
+                                  )}
+                                  <button
+                                    onClick={() => {
+                                      setUploadingRecordId(record.id)
+                                      if (historyFileInputRef.current) {
+                                        historyFileInputRef.current.click()
+                                      }
+                                    }}
+                                    className="text-[11px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded font-medium border"
+                                  >
+                                    {record.receipt_url ? '更換收據' : '+ 上傳收據'}
+                                  </button>
+                                </div>
                               </div>
                             </div>
                             <div className="flex flex-col items-end gap-1.5 shrink-0">
