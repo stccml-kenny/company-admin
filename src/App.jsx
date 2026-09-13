@@ -144,12 +144,14 @@ function App() {
 
   const currentCategoryFilterOptions = getDynamicCategoryFilterOptions()
 
-  const generateDocNumber = async (typeVal, dateVal, existingDocs = documents) => {
+  const generateDocNumber = async (typeVal, dateVal, existingDocs = documents, currentEditingId = editingDocId) => {
     const prefix = typeVal === 'quotation' ? 'QT' : 'INV'
     const dateStr = dateVal.replace(/-/g, '') 
     const pattern = `${prefix}-${dateStr}-`
 
-    const sameDayDocs = existingDocs.filter(d => d.doc_number && d.doc_number.startsWith(pattern))
+    // 排除當前正在編輯的單據，避免重複計算序號
+    const otherDocs = existingDocs.filter(d => d.id !== currentEditingId)
+    const sameDayDocs = otherDocs.filter(d => d.doc_number && d.doc_number.startsWith(pattern))
     const nextSeq = sameDayDocs.length + 1
     const seqStr = String(nextSeq).padStart(3, '0')
 
@@ -158,10 +160,8 @@ function App() {
 
   useEffect(() => {
     const updateNum = async () => {
-      if (!editingDocId) {
-        const num = await generateDocNumber(docType, issueDate, documents)
-        setDocNumber(num)
-      }
+      const num = await generateDocNumber(docType, issueDate, documents, editingDocId)
+      setDocNumber(num)
     }
     updateNum()
   }, [docType, issueDate, documents, editingDocId])
@@ -891,6 +891,7 @@ function App() {
   const percentageNum = Number(paymentPercentage) || 100
   const finalTotalAmount = rawSubtotal * (percentageNum / 100)
 
+  // 儲存（建立或編輯）單據：會自動重新計算編號並更新資料庫
   const handleSaveDocument = async (e) => {
     e.preventDefault()
     if (!selectedCustomerId) {
@@ -898,53 +899,13 @@ function App() {
       return
     }
 
-    if (editingDocId) {
-      const { error: docError } = await supabase.from('documents').update({
-        type: docType,
-        customer_id: selectedCustomerId,
-        issue_date: issueDate,
-        due_date: docType === 'quotation' ? (dueDate || null) : null,
-        issued_by: issuedBy,
-        subtotal: rawSubtotal,
-        total_amount: finalTotalAmount,
-        payment_percentage: percentageNum,
-        payment_method: paymentMethod,
-        payment_remark: paymentRemark,
-        remark: docRemark
-      }).eq('id', editingDocId)
+    setIsLoading(true)
+    try {
+      // 編輯模式：先刪除原有的明細，然後更新主檔（包含根據最新 issueDate 自動產生的新單號）
+      if (editingDocId) {
+        const finalDocNumber = await generateDocNumber(docType, issueDate, documents, editingDocId)
 
-      if (docError) {
-        alert('更新單據失敗: ' + docError.message)
-        return
-      }
-
-      await supabase.from('document_items').delete().eq('document_id', editingDocId)
-
-      const itemsToInsert = items.map(item => {
-        const qty = Number(item.quantity) || 1
-        const sess = Number(item.sessions) || 1
-        const price = Number(item.unit_price) || 0
-        return {
-          document_id: editingDocId,
-          item_name: item.item_name,
-          quantity: qty,
-          sessions: sess,
-          unit_price: price,
-          amount: qty * sess * price
-        }
-      })
-
-      await supabase.from('document_items').insert(itemsToInsert)
-
-      alert('✅ 單據更新成功！')
-      setEditingDocId(null)
-      setView('documents')
-      fetchData()
-    } else {
-      const finalDocNumber = await generateDocNumber(docType, issueDate, documents)
-
-      const { data: docResult, error: docError } = await supabase.from('documents').insert([
-        {
+        const { error: docError } = await supabase.from('documents').update({
           type: docType,
           doc_number: finalDocNumber,
           customer_id: selectedCustomerId,
@@ -956,40 +917,86 @@ function App() {
           payment_percentage: percentageNum,
           payment_method: paymentMethod,
           payment_remark: paymentRemark,
-          remark: docRemark,
-          status: 'draft'
-        }
-      ]).select().single()
+          remark: docRemark
+        }).eq('id', editingDocId)
 
-      if (docError) {
-        alert('儲存失敗: ' + docError.message)
-        return
+        if (docError) throw docError
+
+        // 刪除原有記錄
+        const { error: delError } = await supabase.from('document_items').delete().eq('document_id', editingDocId)
+        if (delError) throw delError
+
+        const itemsToInsert = items.map(item => {
+          const qty = Number(item.quantity) || 1
+          const sess = Number(item.sessions) || 1
+          const price = Number(item.unit_price) || 0
+          return {
+            document_id: editingDocId,
+            item_name: item.item_name,
+            quantity: qty,
+            sessions: sess,
+            unit_price: price,
+            amount: qty * sess * price
+          }
+        })
+
+        const { error: insErr } = await supabase.from('document_items').insert(itemsToInsert)
+        if (insErr) throw insErr
+
+        alert('✅ 單據更新成功（單號已自動更新）！')
+        setEditingDocId(null)
+        setView('documents')
+        await fetchData()
+      } else {
+        // 新增模式
+        const finalDocNumber = await generateDocNumber(docType, issueDate, documents, null)
+
+        const { data: docResult, error: docError } = await supabase.from('documents').insert([
+          {
+            type: docType,
+            doc_number: finalDocNumber,
+            customer_id: selectedCustomerId,
+            issue_date: issueDate,
+            due_date: docType === 'quotation' ? (dueDate || null) : null,
+            issued_by: issuedBy,
+            subtotal: rawSubtotal,
+            total_amount: finalTotalAmount,
+            payment_percentage: percentageNum,
+            payment_method: paymentMethod,
+            payment_remark: paymentRemark,
+            remark: docRemark,
+            status: 'draft'
+          }
+        ]).select().single()
+
+        if (docError) throw docError
+
+        const docId = docResult.id
+        const itemsToInsert = items.map(item => {
+          const qty = Number(item.quantity) || 1
+          const sess = Number(item.sessions) || 1
+          const price = Number(item.unit_price) || 0
+          return {
+            document_id: docId,
+            item_name: item.item_name,
+            quantity: qty,
+            sessions: sess,
+            unit_price: price,
+            amount: qty * sess * price
+          }
+        })
+
+        const { error: itemError } = await supabase.from('document_items').insert(itemsToInsert)
+        if (itemError) throw itemError
+
+        alert('✅ 單據建立成功！')
+        setView('documents')
+        await fetchData()
       }
-
-      const docId = docResult.id
-      const itemsToInsert = items.map(item => {
-        const qty = Number(item.quantity) || 1
-        const sess = Number(item.sessions) || 1
-        const price = Number(item.unit_price) || 0
-        return {
-          document_id: docId,
-          item_name: item.item_name,
-          quantity: qty,
-          sessions: sess,
-          unit_price: price,
-          amount: qty * sess * price
-        }
-      })
-
-      const { error: itemError } = await supabase.from('document_items').insert(itemsToInsert)
-      if (itemError) {
-        alert('儲存明細失敗: ' + itemError.message)
-        return
-      }
-
-      alert('✅ 單據建立成功！')
-      setView('documents')
-      fetchData()
+    } catch (err) {
+      alert('❌ 儲存單據失敗：' + err.message)
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -1424,7 +1431,6 @@ function App() {
               <button type="submit" className="w-full bg-gray-800 hover:bg-gray-900 text-white text-xs py-1.5 rounded font-bold shadow">新增員工</button>
             </form>
 
-            {/* 新增預支資金記錄表單（「日期」輸入框尺寸已嚴格限制為 max-w-[110px]） */}
             <form onSubmit={handleAddAdvanceTransaction} className="bg-indigo-50 p-3 rounded-lg border border-indigo-200 mb-6 space-y-2.5">
               <h2 className="text-xs font-bold text-indigo-900">新增預支資金記錄</h2>
               <div className="grid grid-cols-2 gap-2 items-center">
@@ -1930,10 +1936,8 @@ function App() {
                   <select value={docType} onChange={async (e) => {
                     const t = e.target.value
                     setDocType(t)
-                    if (!editingDocId) {
-                      const newNum = await generateDocNumber(t, issueDate, documents)
-                      setDocNumber(newNum)
-                    }
+                    const newNum = await generateDocNumber(t, issueDate, documents, editingDocId)
+                    setDocNumber(newNum)
                   }} className="w-full border rounded p-2 text-xs bg-white outline-none">
                     <option value="quotation">報價單</option>
                     <option value="invoice">發票</option>
@@ -1961,10 +1965,8 @@ function App() {
                   onChange={async (e) => {
                     const d = e.target.value
                     setIssueDate(d)
-                    if (!editingDocId) {
-                      const newNum = await generateDocNumber(docType, d, documents)
-                      setDocNumber(newNum)
-                    }
+                    const newNum = await generateDocNumber(docType, d, documents, editingDocId)
+                    setDocNumber(newNum)
                   }} 
                   required 
                   className="w-full max-w-[220px] box-border min-w-0 block border rounded p-2 text-xs bg-white outline-none [color-scheme:light]" 
