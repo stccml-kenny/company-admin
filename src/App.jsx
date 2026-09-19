@@ -149,7 +149,6 @@ function App() {
     const dateStr = dateVal.replace(/-/g, '') 
     const pattern = `${prefix}-${dateStr}-`
 
-    // 排除當前正在編輯的單據，避免重複計算序號
     const otherDocs = existingDocs.filter(d => d.id !== currentEditingId)
     const sameDayDocs = otherDocs.filter(d => d.doc_number && d.doc_number.startsWith(pattern))
     const nextSeq = sameDayDocs.length + 1
@@ -891,7 +890,6 @@ function App() {
   const percentageNum = Number(paymentPercentage) || 100
   const finalTotalAmount = rawSubtotal * (percentageNum / 100)
 
-  // 儲存（建立或編輯）單據：會自動重新計算編號並更新資料庫
   const handleSaveDocument = async (e) => {
     e.preventDefault()
     if (!selectedCustomerId) {
@@ -901,7 +899,6 @@ function App() {
 
     setIsLoading(true)
     try {
-      // 編輯模式：先刪除原有的明細，然後更新主檔（包含根據最新 issueDate 自動產生的新單號）
       if (editingDocId) {
         const finalDocNumber = await generateDocNumber(docType, issueDate, documents, editingDocId)
 
@@ -922,7 +919,6 @@ function App() {
 
         if (docError) throw docError
 
-        // 刪除原有記錄
         const { error: delError } = await supabase.from('document_items').delete().eq('document_id', editingDocId)
         if (delError) throw delError
 
@@ -948,7 +944,6 @@ function App() {
         setView('documents')
         await fetchData()
       } else {
-        // 新增模式
         const finalDocNumber = await generateDocNumber(docType, issueDate, documents, null)
 
         const { data: docResult, error: docError } = await supabase.from('documents').insert([
@@ -1212,7 +1207,7 @@ function App() {
                 const rowTotal = qty * sess * price
                 return (
                   <tr key={idx} className="border-b">
-                    <td className="p-2.5">{item.item_name}</td>
+                    <td className="p-2.5 whitespace-pre-line">{item.item_name}</td>
                     <td className="p-2.5 text-center">{qty}</td>
                     <td className="p-2.5 text-center">{sess}</td>
                     <td className="p-2.5 text-right">${price.toFixed(2)}</td>
@@ -1234,13 +1229,13 @@ function App() {
 
           <div className="bg-blue-50/50 border border-blue-100 p-3 rounded mb-4 text-xs space-y-1">
             <p className="font-bold text-gray-700">支付方式：<span className="text-blue-600">{method}</span></p>
-            {pRemark && <p className="text-gray-600">支付備註：{pRemark}</p>}
+            {pRemark && <p className="text-gray-600 whitespace-pre-line">支付備註：{pRemark}</p>}
           </div>
 
           {docData.remark && (
             <div className="border-t pt-3 text-xs text-gray-600 mb-8">
               <p className="font-bold mb-1">備註：</p>
-              <p>{docData.remark}</p>
+              <p className="whitespace-pre-line">{docData.remark}</p>
             </div>
           )}
 
@@ -1921,7 +1916,7 @@ function App() {
             </div>
           </>
         ) : view === 'createDoc' ? (
-          // ================= 建立 / 編輯單據表單 =================
+          // ================= 建立 / 編輯單據表單（項目說明、總備註、以及銀行/支票備註皆支援多行顯示） =================
           <>
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-bold text-gray-800">{editingDocId ? '編輯單據' : '建立新單據'}</h1>
@@ -1994,44 +1989,53 @@ function App() {
               {items.map((item, index) => (
                 <div key={index} className="bg-white p-2.5 rounded border mb-2 space-y-2">
                   <div>
-                    <label className="block text-[10px] text-gray-500 mb-0.5">項目說明</label>
+                    <label className="block text-[10px] text-gray-500 mb-0.5">項目說明（支援多行輸入）</label>
                     {item.isCustom ? (
-                      <div className="flex gap-1">
-                        <input 
-                          type="text" 
-                          placeholder="請手動輸入項目說明" 
+                      <div className="flex gap-1 items-start">
+                        <textarea 
+                          placeholder="請手動輸入項目說明（可換行）" 
                           value={item.item_name} 
                           onChange={(e) => updateItem(index, 'item_name', e.target.value)} 
+                          rows={2}
                           required 
-                          className="flex-1 border rounded p-1.5 text-xs bg-white outline-none" 
+                          className="flex-1 border rounded p-1.5 text-xs bg-white outline-none resize-y" 
                         />
                         <button 
                           type="button" 
                           onClick={() => updateItem(index, 'isCustom', false)} 
-                          className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 text-[10px] rounded font-semibold"
+                          className="bg-gray-200 hover:bg-gray-300 text-gray-700 px-2 py-1 text-[10px] rounded font-semibold shrink-0"
                         >
                           返回下拉
                         </button>
                       </div>
                     ) : (
-                      <select 
-                        value={item.item_name}
-                        onChange={(e) => {
-                          if (e.target.value === 'CUSTOM_INPUT') {
-                            updateItem(index, 'item_name', 'CUSTOM_INPUT')
-                          } else {
-                            updateItem(index, 'item_name', e.target.value)
-                          }
-                        }}
-                        required
-                        className="w-full border rounded p-1.5 text-xs bg-white outline-none"
-                      >
-                        <option value="">-- 請選擇項目說明 --</option>
-                        {commonItemOptions.map(opt => (
-                          <option key={opt.id} value={opt.name}>{opt.name}</option>
-                        ))}
-                        <option value="CUSTOM_INPUT">✏️ 手動輸入其他項目...</option>
-                      </select>
+                      <div className="space-y-1.5">
+                        <select 
+                          value={commonItemOptions.some(opt => opt.name === item.item_name) ? item.item_name : ''}
+                          onChange={(e) => {
+                            if (e.target.value === 'CUSTOM_INPUT') {
+                              updateItem(index, 'item_name', 'CUSTOM_INPUT')
+                            } else {
+                              updateItem(index, 'item_name', e.target.value)
+                            }
+                          }}
+                          required={!item.item_name}
+                          className="w-full border rounded p-1.5 text-xs bg-white outline-none"
+                        >
+                          <option value="">-- 請選擇項目說明 --</option>
+                          {commonItemOptions.map(opt => (
+                            <option key={opt.id} value={opt.name}>{opt.name}</option>
+                          ))}
+                          <option value="CUSTOM_INPUT">✏️ 手動輸入其他項目...</option>
+                        </select>
+                        <textarea
+                          value={item.item_name}
+                          onChange={(e) => updateItem(index, 'item_name', e.target.value)}
+                          placeholder="可在此補充或換行輸入詳細項目內容..."
+                          rows={2}
+                          className="w-full border rounded p-1.5 text-xs bg-white outline-none resize-y"
+                        />
+                      </div>
                     )}
                   </div>
 
@@ -2094,21 +2098,28 @@ function App() {
               {(paymentMethod === '支票' || paymentMethod === '銀行轉賬') && (
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">
-                    {paymentMethod === '支票' ? '支票備註 (如：支票號碼/銀行)' : '銀行轉賬備註 (如：轉賬帳號/戶名)'}
+                    {paymentMethod === '支票' ? '支票備註 (如：支票號碼/銀行)' : '銀行轉賬備註 (如：轉賬帳號/戶名) - 支援多行輸入'}
                   </label>
-                  <input 
-                    type="text" 
+                  {/* 銀行轉賬/支票備註改為多行 textarea */}
+                  <textarea 
                     value={paymentRemark} 
                     onChange={(e) => setPaymentRemark(e.target.value)} 
-                    placeholder={paymentMethod === '支票' ? '請輸入支票號碼或相關資訊' : '請輸入轉賬帳號或相關資訊'} 
-                    className="w-full border rounded p-2 text-xs bg-white outline-none"
+                    rows={2}
+                    placeholder={paymentMethod === '支票' ? '請輸入支票號碼或相關資訊...' : '請輸入轉賬帳號或相關資訊（可換行）...'} 
+                    className="w-full border rounded p-2 text-xs outline-none bg-white resize-y"
                   />
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">備註</label>
-                <textarea value={docRemark} onChange={(e) => setDocRemark(e.target.value)} rows={2} className="w-full border rounded p-2 text-xs outline-none bg-white" placeholder="付款條件等..."></textarea>
+                <label className="block text-xs font-medium text-gray-700 mb-1">備註（支援多行輸入）</label>
+                <textarea 
+                  value={docRemark} 
+                  onChange={(e) => setDocRemark(e.target.value)} 
+                  rows={3} 
+                  className="w-full border rounded p-2 text-xs outline-none bg-white resize-y" 
+                  placeholder="付款條件等（可換行）..."
+                ></textarea>
               </div>
 
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white text-xs py-3 rounded-lg font-bold shadow">
